@@ -41,3 +41,12 @@ docs/.venv/
 
 ### Mac OS ###
 .DS_Store
+### Swift ###
+jmcomic-swift/.build/
+
+### SwiftPM / macOS ###
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.p12
