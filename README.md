@@ -19,6 +19,7 @@
 <p align="center">
   <a href="#-下载安装">📦 下载</a> ·
   <a href="#-功能">✨ 功能</a> ·
+  <a href="#-上游接口仓库">🔗 上游</a> ·
   <a href="#-构建">🔨 构建</a> ·
   <a href="#-隐私与安全">🔒 隐私</a> ·
   <a href="#-免责声明">⚠️ 免责</a>
@@ -65,6 +66,14 @@ JMComic-release/
 - 浏览 / 阅读 / 收藏 / 本地库，与 Mac 端功能对齐
 - **桌面端同步**：扫描桌面端二维码配对，局域网内阅读桌面端已下载的漫画
 
+## 🔗 上游接口仓库
+
+本项目的接口加解密、图片解重组、域名轮换等机制参考自上游 Java API 库：
+
+> **[JMComic-Api-Java](https://github.com/JUKOMU/JMComic-Api-Java)** — 获取 JMComic（禁漫天堂）数据的 Java API 库（MIT，© JUKOMU）
+
+上游能力全面（漫画/下载/用户/评论/收藏/小说/创作者/签到/发现等），本项目用 **Swift** 从零重新实现其中的「浏览 / 阅读 / 收藏 / 同步」核心子集，并叠加原生 SwiftUI 图形界面。完整的上游能力对照表见 [docs/upstream.md](docs/upstream.md)。
+
 ## 🔨 构建
 
 ### macOS
@@ -101,7 +110,7 @@ jmcomic-swift/Sources/JMComic/
 
 **关键设计**：actor 保证并发安全、零依赖、图片解重组不重编码、域名失败自动轮换、AES 密钥落钥匙串且文件权限 0600。
 
-> 详见 [CLAUDE.md](CLAUDE.md) 与 [API.md](API.md)。
+> 📚 完整文档见 [docs/](docs/)：[上游对照](docs/upstream.md) · [架构设计](docs/architecture.md) · [接口文档](docs/api.md) · [开发指引](CLAUDE.md)
 
 ## 🔒 隐私与安全
 
