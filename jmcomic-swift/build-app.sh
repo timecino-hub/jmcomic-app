@@ -26,6 +26,10 @@ echo "==> 组装 ${APP_DIR}"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/${APP_NAME}"
+# App 图标（与 AppIcon.icns 同目录，缺失则跳过，不阻塞构建）
+if [ -f "AppIcon.icns" ]; then
+    cp "AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -39,6 +43,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleExecutable</key><string>${APP_NAME}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <!-- 有窗口的普通 App，不是后台代理 -->
     <key>LSUIElement</key><false/>
