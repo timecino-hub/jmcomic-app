@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 APP_NAME="JMComic"
 BUNDLE_ID="local.jmcomic.reader"
-VERSION="1.0.0"
+VERSION="1.2.0"
 BIN_PATH=".build/arm64-apple-macosx/release/${APP_NAME}"
 APP_DIR="dist/${APP_NAME}.app"
 
