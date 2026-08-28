@@ -1,6 +1,8 @@
-# API 接口文档
+# 接口文档
 
-本文档记录 JMComic macOS 阅读器涉及的所有网络接口，包括外部 API、内建 Web 服务器、图片代理和同步接口。
+本文档记录 JMComic 阅读器涉及的所有网络接口，包括外部 API、内建 Web 服务器、图片代理和同步接口。
+
+> 本项目的接口加解密、域名轮换、图片解重组等机制参考自上游 [JMComic-Api-Java](https://github.com/JUKOMU/JMComic-Api-Java)，详见 [upstream.md](upstream.md)。架构与模块见 [architecture.md](architecture.md)。
 
 ---
 
