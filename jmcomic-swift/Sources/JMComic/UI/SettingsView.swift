@@ -1,23 +1,16 @@
 import SwiftUI
 import AppKit
 import CoreImage
-import UniformTypeIdentifiers
+import CoreImage.CIFilterBuiltins
 
-/// 设置页（侧边栏独立页面，两栏排版，默认窗口一屏放下不滚动）。
+/// 设置页（侧边栏独立页面，两栏排版）。
 ///
-/// 左栏：局域网访问；右栏：本地偏好 / 隐私保护 / 数据备份；
-/// 底部通栏：在线设备管理。
+/// 左栏：本地偏好 / 隐私保护；右栏：数据备份 / GitHub 同步。
 struct SettingsView: View {
 
-    @ObservedObject private var web = WebService.shared
     @ObservedObject private var library = LibraryStore.shared
     @ObservedObject private var favorites = FavoriteStore.shared
 
-    @State private var hasPassword = false
-    @State private var newPassword = ""
-    @State private var confirmPassword = ""
-    @State private var portText = String(WebService.shared.port)
-    @State private var qrIP: String?
     @State private var notice: String?
     @State private var isError = false
 
@@ -38,7 +31,10 @@ struct SettingsView: View {
     @State private var syncToken = ""
     @State private var syncPassword = ""
 
-    // 内容过滤（不感兴趣的分组/标签）——点选预设选项
+    // iPhone 局域网同步
+    @ObservedObject private var lan = LanSyncServer.shared
+
+    // 内容过滤
     private static let exclusionOptions = [
         "NTR", "觸手", "獸人", "偽娘", "百合", "純愛",
         "兄妹", "亂倫", "中出", "足控", "3D", "AI繪圖",
@@ -57,206 +53,28 @@ struct SettingsView: View {
                     GridItem(.flexible(minimum: 330), alignment: .top),
                     GridItem(.flexible(minimum: 330), alignment: .top),
                 ], alignment: .leading, spacing: 16) {
-                    card { lanSection }
-
                     VStack(alignment: .leading, spacing: 16) {
                         card { preferenceSection }
                         card { privacySection }
-                        card { backupSection }
-                        card { githubSyncSection }
                     }
 
-                    card { deviceSection }
-                        .gridCellColumns(2)
+                    VStack(alignment: .leading, spacing: 16) {
+                        card { backupSection }
+                        card { githubSyncSection }
+                        card { iphoneSyncSection }
+                    }
                 }
             }
             .padding(20)
             .frame(maxWidth: 900, alignment: .leading)
         }
-        .task {
-            hasPassword = await WebAuth.shared.hasPassword
-            await web.refreshEntryToken()
-        }
     }
 
-    /// 统一卡片样式
     private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 10) { c() }
             .padding(14)
             .background(Color.primary.opacity(0.03))
             .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: - 局域网访问
-
-    private var lanSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("局域网访问").font(.headline)
-            Text("同一 WiFi 下扫码/输口令进入。")
-                .font(.caption2).foregroundStyle(.secondary)
-
-            if !hasPassword {
-                Label("先设访问密码才能开启服务",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2).foregroundStyle(.orange)
-            }
-
-            HStack(spacing: 10) {
-                Button(web.isRunning ? "停止服务" : "启动服务") {
-                    if web.isRunning {
-                        web.stop()
-                    } else {
-                        if let p = UInt16(portText), p >= 1024 { web.port = p }
-                        web.start()
-                    }
-                }
-                .disabled(!hasPassword)
-
-                Text("端口")
-                TextField("", text: $portText).frame(width: 62).disabled(web.isRunning)
-
-                Circle().fill(web.isRunning ? .green : .secondary).frame(width: 8, height: 8)
-                Text(web.isRunning ? "运行中" : "已停止").font(.caption2).foregroundStyle(.secondary)
-            }
-
-            Toggle("HTTPS 加密", isOn: $web.useHTTPS)
-                .font(.caption).disabled(web.isRunning)
-                .onChange(of: web.useHTTPS) { _, _ in
-                    flash("加密开关在服务停止后生效", error: false)
-                }
-
-            Toggle("扫码自动登录（免密码）", isOn: $web.scanAutoLogin)
-                .font(.caption)
-            if web.scanAutoLogin {
-                Label("拿到二维码者无需密码即可进入。",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2).foregroundStyle(.orange)
-            }
-
-            Toggle("本机免登录（127.0.0.1 直接进）", isOn: $web.localAutoLogin)
-                .font(.caption)
-            if web.localAutoLogin {
-                Label("注意：本机上的进程/恶意网页可能直接访问。",
-                      systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2).foregroundStyle(.orange)
-                // 勾选后变为可点击：一键用默认浏览器打开本机入口
-                HStack(spacing: 10) {
-                    Button {
-                        if let url = URL(string: "\(web.scheme)://127.0.0.1:\(web.port)") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    } label: {
-                        Label("在浏览器中打开", systemImage: "safari")
-                            .frame(minWidth: 110)
-                    }
-                    .buttonStyle(.bordered)
-                    .font(.caption)
-                    .disabled(!web.isRunning)
-                    Text(web.isRunning ? "\(web.scheme)://127.0.0.1:\(web.port)" : "启动服务后可用")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-
-
-
-            if let err = web.lastError {
-                Text("启动失败：\(err)").font(.caption).foregroundStyle(.red)
-            }
-
-            if web.isRunning, !web.addresses.isEmpty {
-                entryCard
-            }
-
-            Text(hasPassword ? "修改访问密码" : "设置访问密码").font(.subheadline.weight(.medium))
-            SecureField("新密码（至少 6 位）", text: $newPassword)
-            SecureField("再次输入", text: $confirmPassword)
-
-            HStack {
-                Button("保存密码") { savePassword() }
-                    .disabled(newPassword.count < 6 || newPassword != confirmPassword)
-                if hasPassword {
-                    Button("清除密码", role: .destructive) {
-                        Concurrency.detached {
-                            await WebAuth.shared.clearPassword()
-                            await MainActor.run {
-                                hasPassword = false
-                                web.stop()
-                                flash("密码已清除，服务已停止", error: false)
-                            }
-                        }
-                    }
-                }
-            }
-            .font(.caption)
-
-            if let notice {
-                Text(notice).font(.caption).foregroundStyle(isError ? .red : .green)
-            }
-        }
-    }
-
-    /// 入口卡片：二维码 + 手输口令 + 换一个
-    private var entryCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if web.addresses.count > 1 {
-                Picker("二维码地址", selection: $qrIP) {
-                    ForEach(web.addresses, id: \.self) { ip in Text(ip) }
-                }
-                .font(.caption2)
-            }
-
-            if let url = web.entryURL(ip: qrIP ?? web.addresses.first),
-               let qr = Self.qrImage(url) {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(nsImage: qr)
-                        .interpolation(.none)
-                        .frame(width: 116, height: 116)
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("手机扫码进阅读").font(.caption.weight(.medium))
-                        Text("口令一次性，每次使用自动更换。")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Text(web.scanAutoLogin ? "当前：扫码直接进入" : "当前：扫码后输密码")
-                            .font(.caption2).foregroundStyle(web.scanAutoLogin ? .green : .secondary)
-
-                        HStack(spacing: 5) {
-                            Text(web.entryToken)
-                                .font(.system(.caption2, design: .monospaced))
-                                .lineLimit(1).truncationMode(.middle)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.06))
-                                .clipShape(RoundedRectangle(cornerRadius: 5))
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(web.entryToken, forType: .string)
-                                flash("口令已复制", error: false)
-                            } label: { Image(systemName: "doc.on.doc") }
-                            .buttonStyle(.borderless)
-                            Button("换一个") { web.rotateEntryToken() }
-                                .buttonStyle(.borderless).font(.caption2)
-                        }
-                    }
-                }
-            }
-
-            ForEach(web.addresses, id: \.self) { ip in
-                let url = "\(web.scheme)://\(ip):\(web.port)"
-                HStack {
-                    Text(url).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(url, forType: .string)
-                        flash("已复制", error: false)
-                    } label: { Image(systemName: "doc.on.doc") }
-                    .buttonStyle(.borderless)
-                }
-            }
-        }
-        .padding(8)
-        .background(Color.primary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - 本地偏好
@@ -274,7 +92,6 @@ struct SettingsView: View {
             Divider().padding(.vertical, 2)
 
             Text("内容过滤（不感兴趣）").font(.subheadline.weight(.medium))
-            // 点选排除项（预设标签，可多选）
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6)],
                       alignment: .leading, spacing: 6) {
                 ForEach(Self.exclusionOptions, id: \.self) { t in
@@ -437,7 +254,6 @@ struct SettingsView: View {
         flash("已保存，点「立即同步」测试", error: false)
     }
 
-    /// 新机一键：读本机 gh CLI 的登录 token 填入
     private func importTokenFromGH() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -463,7 +279,90 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 数据备份（收藏 + 历史/进度，各自独立导入导出）
+    // MARK: - iPhone 同步（局域网）
+
+    private var iphoneSyncSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("iPhone 同步").font(.headline)
+            Text("Mac 起局域网服务，iPhone 扫码配对后双向同步收藏/历史/进度并传输已下载漫画。payload 加密传输，明文不出本机。")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Toggle("开启服务", isOn: $lan.enabled)
+                .font(.caption)
+
+            if lan.enabled {
+                if let addr = lan.addressText {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi").font(.caption)
+                        Text(addr).font(.caption.monospaced())
+                        Button("复制地址") { copyToPasteboard(addr) }
+                            .buttonStyle(.borderless).font(.caption2)
+                        Spacer()
+                        if lan.running == false {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 14) {
+                        QRCodeView(text: lan.qrConfigString() ?? "")
+                            .frame(width: 148, height: 148)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("iPhone 未扫码时可手动输入：").font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(lan.pairCode)
+                                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                                .kerning(3)
+                            Button("重新生成配对码") {
+                                lan.regeneratePairCode()
+                                flash("已重置，旧配对码失效；已配对设备不受影响", error: false)
+                            }
+                            .buttonStyle(.bordered).font(.caption)
+                            Text("配对码既是 /pair 凭证，也是同步数据的加密密钥来源，仅限自己使用。")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                } else if lan.lastError == nil {
+                    Text("正在启动监听…（未检测到局域网 IPv4 地址）")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                if !lan.devices.isEmpty {
+                    Divider().padding(.vertical, 2)
+                    Text("已配对设备（\(lan.devices.count)）")
+                        .font(.subheadline.weight(.medium))
+                    ForEach(lan.devices) { d in
+                        HStack(spacing: 8) {
+                            Image(systemName: "iphone").font(.caption)
+                            Text(d.name).font(.caption)
+                            Text(Self.relativeTime(d.pairedAt))
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("撤销") {
+                                lan.revoke(d.id)
+                                flash("已撤销「\(d.name)」，其会话立即失效", error: false)
+                            }
+                            .buttonStyle(.borderless).font(.caption)
+                        }
+                    }
+                    Text("撤销后该设备的后续请求一律被拒（401），需重新扫码配对。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                if let err = lan.lastError {
+                    Text(err).font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func copyToPasteboard(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+        flash("已复制 \(s)", error: false)
+    }
+
+    // MARK: - 数据备份
 
     private var backupSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -532,47 +431,6 @@ struct SettingsView: View {
         flash(n > 0 ? "已合并 \(n) 条进度" : "无新增进度", error: n == 0)
     }
 
-    // MARK: - 在线设备
-
-    private var deviceSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("在线设备").font(.headline)
-                Spacer()
-                Button("全部下线") { web.revokeAllDevices() }
-                    .font(.caption).buttonStyle(.borderless)
-                    .disabled(web.activeDevices.isEmpty)
-            }
-            if web.activeDevices.isEmpty {
-                Text(web.isRunning ? "暂无设备在线" : "服务未启动")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                HStack(spacing: 16) {
-                    ForEach(web.activeDevices) { d in
-                        HStack(spacing: 8) {
-                            Image(systemName: "iphone").foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(d.name).font(.caption.weight(.medium))
-                                Text("\(d.ip) · \(Self.relativeTime(d.lastSeen)) · \(d.lastPath)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Toggle("信任", isOn: Binding<Bool>(
-                                get: { d.trusted },
-                                set: { web.setTrusted(id: d.id, trusted: $0) }))
-                                .toggleStyle(.checkbox)
-                                .font(.caption)
-                                .help("取消信任后该设备只能看不能改（进度/收藏只读）")
-                            Button("踢出") { web.revokeDevice(id: d.id) }
-                                .font(.caption).buttonStyle(.borderless).foregroundStyle(.red)
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
-            }
-        }
-    }
-
     // MARK: - 工具
 
     private static func relativeTime(_ d: Date) -> String {
@@ -583,33 +441,42 @@ struct SettingsView: View {
         return "\(s / 86400) 天前"
     }
 
-    private static func qrImage(_ url: String) -> NSImage? {
-        guard let data = url.data(using: .utf8),
-              let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        filter.setValue(data, forKey: "inputMessage")
-        filter.setValue("M", forKey: "inputCorrectionLevel")
-        guard let output = filter.outputImage else { return nil }
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
-        let ctx = CIContext()
-        guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: 116, height: 116))
+    private func flash(_ msg: String, error: Bool) {
+        notice = msg
+        isError = error
     }
+}
 
-    private func savePassword() {
-        let pw = newPassword
-        Concurrency.detached {
-            await WebAuth.shared.setPassword(pw)
-            await MainActor.run {
-                hasPassword = true
-                newPassword = ""
-                confirmPassword = ""
-                flash("密码已保存，其他设备需重新扫码登录", error: false)
+/// 二维码渲染：CoreImage CIFilter.qrCodeGenerator → CGImage → NSImage。
+/// 内容即 LanSyncServer.qrConfigString() 的自包含配置串。
+private struct QRCodeView: View {
+    let text: String
+
+    var body: some View {
+        Group {
+            if let ns = Self.image(for: text) {
+                Image(nsImage: ns)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else if !text.isEmpty {
+                Text("二维码生成失败").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private func flash(_ msg: String, error: Bool) {
-        notice = msg
-        isError = error
+    static func image(for text: String) -> NSImage? {
+        guard !text.isEmpty else { return nil }
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let ci = filter.outputImage, ci.extent.width > 0 else { return nil }
+        // 原始模块矩阵很小，放大到 ~300px 供屏显清晰
+        let scale = 300.0 / ci.extent.width
+        let scaled = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let context = CIContext()
+        guard let cg = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 }

@@ -350,6 +350,12 @@ final class LibraryStore: ObservableObject {
         scheduleSaveState()
     }
 
+    /// 清空「最近浏览」（不动历史与阅读进度）
+    func clearRecentlyViewed() {
+        recentlyViewed.removeAll()
+        scheduleSaveState()
+    }
+
     func clearHistory() {
         history.removeAll()
         positions.removeAll()

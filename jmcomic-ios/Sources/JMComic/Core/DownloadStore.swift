@@ -61,13 +61,16 @@ final class DownloadStore: ObservableObject {
         didSet { UserDefaults.standard.set(format.rawValue, forKey: "downloadFormat") }
     }
 
-    /// 下载根目录，默认 ~/Downloads/JMComic
+    /// 下载根目录，默认 Application Support/JMComic/downloads。
+    /// iOS 适配：iOS 沙盒没有用户可见的 ~/Downloads（.downloadsDirectory 在 iOS 返回空数组，
+    /// 下标会越界），按迁移规范统一落到 Application Support/JMComic/… 下重建目录结构。
     @Published var root: URL = {
         if let s = UserDefaults.standard.string(forKey: "downloadRoot") {
             return URL(fileURLWithPath: s)
         }
-        let d = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return d.appendingPathComponent("JMComic", isDirectory: true)
+            .appendingPathComponent("downloads", isDirectory: true)
     }() {
         didSet { UserDefaults.standard.set(root.path, forKey: "downloadRoot") }
     }
@@ -356,6 +359,69 @@ final class DownloadStore: ObservableObject {
         }
         save()
         return imported
+    }
+
+    // MARK: - 局域网同步注册（桌面传输完成后入库）
+
+    /// 桌面同步传输完成后的注册入口（同 id 先移除再插入，语义与 run() 落库一致）。
+    /// 记录由 TransferManager 按传输清单重建，注册后 LocalLibraryView/LocalReaderView 即可发现。
+    func recordSyncedAlbum(_ record: DownloadedAlbum) {
+        library.removeAll { $0.meta.id == record.meta.id }
+        library.insert(record, at: 0)
+        save()
+    }
+
+    // MARK: - Files 导入（iOS：fileImporter 从「文件」App 导入 zip/CBZ）
+
+    /// 导入一个 zip/CBZ 归档到本地库。
+    ///
+    /// 流程（复用扫描导入的记录语义）：安全作用域访问 → 拷贝进下载根目录（沙盒授权过期后仍可读）
+    /// → 以目标路径哈希为 id 注册单章记录。重复导入同一文件按路径幂等覆盖。
+    /// 返回用户可读的结果说明。
+    @discardableResult
+    func importZIPFile(_ src: URL) async -> String {
+        let didScope = src.startAccessingSecurityScopedResource()
+        defer { if didScope { src.stopAccessingSecurityScopedResource() } }
+
+        // 名字与落点先在主线程算好，文件 IO 全部放到后台任务
+        let title = Self.sanitize(src.deletingPathExtension().lastPathComponent)
+        let importRoot = root.appendingPathComponent("导入", isDirectory: true)
+        let chapterTitle = title
+
+        // 本类型内嵌套了 struct Task（下载任务模型），需用模块全名引用并发的 Task
+        let staged: DownloadedChapter? = await _Concurrency.Task.detached(priority: .utility) { () -> DownloadedChapter? in
+            let fm = FileManager.default
+            try? fm.createDirectory(at: importRoot, withIntermediateDirectories: true)
+            let dest = importRoot.appendingPathComponent("\(title).cbz")
+            if fm.fileExists(atPath: dest.path) {
+                try? fm.removeItem(at: dest)
+            }
+            do {
+                try fm.copyItem(at: src, to: dest)
+            } catch {
+                return nil
+            }
+            let id = Self.fallbackID(dest.path)
+            return DownloadedChapter(chapterId: id, chapterTitle: chapterTitle, sort: 1,
+                                     path: dest.path, pageCount: 0, format: .cbz)
+        }.value
+
+        guard let chapter = staged else { return "导入失败：无法读取所选文件" }
+
+        let recordId = chapter.chapterId
+        let meta = AlbumMeta(id: recordId, title: chapterTitle, authors: [])
+        var record = DownloadedAlbum(meta: meta, chapters: [chapter], completedAt: Date())
+        if let idx = library.firstIndex(where: { $0.meta.id == recordId }) {
+            var merged = library[idx].chapters.filter { $0.chapterId != chapter.chapterId }
+            merged.append(chapter)
+            merged.sort { $0.sort < $1.sort }
+            record.chapters = merged
+            library[idx] = record
+        } else {
+            library.insert(record, at: 0)
+        }
+        save()
+        return "已导入「\(chapterTitle)」"
     }
 
     // MARK: - 删除

@@ -49,11 +49,23 @@ Core/
   ImagePipeline.swift 解码 + 解重组（全程 CGImage，不重编码）
   ImageStore.swift    actor：内存 LRU + 磁盘缓存 + 请求合并 + 宽高比记录
   LibraryStore.swift  元数据缓存、阅读进度、历史
+  LanSyncServer.swift 局域网同步服务（iPhone 配对、元数据合并、下载传输）
 UI/
   BrowseView.swift    封面网格、搜索、热门/最新/历史
   AlbumDetailView.swift 详情、章节、相关作品（续作）
   ReaderView.swift    连续滚动阅读器
 ```
+
+## iPhone 同步
+
+设置页开启「iPhone 同步」后，Mac 起局域网服务并显示二维码，iPhone 端（jmcomic-ios）
+扫码配对即可使用：
+
+- **设置页开启**：开关控制服务启停，重启 App 自动恢复上次的开关状态
+- **扫码配对**：一次性 8 位配对码换会话 token，配对码可随时重置
+- **双向合并元数据**：收藏 / 历史 / 进度双向同步，进度按更新时间新的赢、收藏按 id 去重
+- **传输已下载漫画**：Mac 上已下载的整本（CBZ/散图）逐文件传到 iPhone 入库
+- **撤销设备**：已配对设备逐台撤销，撤销后会话立即失效
 
 ## 几个实现要点
 

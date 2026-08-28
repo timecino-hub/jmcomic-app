@@ -1,51 +1,118 @@
-# JMComic-Api-Java
+<p align="center">
+  <img src="assets/logo.png" width="180" alt="JMComic Logo" />
+</p>
 
-漫画数据 API（Java）+ macOS 原生阅读器（Swift）多模块项目。
+<h1 align="center">JMComic</h1>
 
-## 模块结构
+<p align="center">
+  原生 SwiftUI 漫画阅读器 · macOS + iOS · 零第三方依赖
+</p>
+
+<p align="center">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg" />
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9-F05138.svg" />
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-14.0%2B-000000?logo=apple&logoColor=white" />
+  <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0%2B-000000?logo=apple&logoColor=white" />
+  <img alt="Release" src="https://img.shields.io/github/v/release/yxxbc/jmcomic-app?include_prereleases" />
+</p>
+
+<p align="center">
+  <a href="#-下载安装">📦 下载</a> ·
+  <a href="#-功能">✨ 功能</a> ·
+  <a href="#-构建">🔨 构建</a> ·
+  <a href="#-隐私与安全">🔒 隐私</a> ·
+  <a href="#-免责声明">⚠️ 免责</a>
+</p>
+
+---
+
+一个为个人使用而生的原生阅读器，用 SwiftUI + SwiftPM 从零搭建，**不依赖任何第三方库**。所有网络、加密、图片解码都用 Apple 原生 API 实现，启动快、体积小、行为可控。
+
+包含两个独立端：
+
+| 端 | 目录 | 说明 |
+| --- | --- | --- |
+| 🖥️ **macOS** | `jmcomic-swift/` | 完整桌面阅读器，SwiftPM 工程 |
+| 📱 **iOS** | `jmcomic-ios/` | 独立 iPhone 应用，可与桌面端局域网同步 |
+
+## 📦 下载安装
+
+前往 [Releases](https://github.com/yxxbc/jmcomic-app/releases) 下载最新的 `JMComic-*.zip`，解压后包含：
 
 ```
-jmcomic-api               零第三方依赖：接口 / 模型 / 枚举 / 异常
-  └─ jmcomic-core         实现：客户端 / 网络 / 加密 / 解析 / 缓存 / 下载
-       ├─ jmcomic-android-support   Android 图片处理 SPI
-       ├─ jmcomic-desktop-support   Swing 桌面 Demo
-       ├─ jmcomic-sample            用法示例（默认不编译）
-       └─ jmcomic-swift             macOS 阅读器（SwiftUI + SwiftPM）
-            ├─ jmcomic-swift/       Swift 版正式源码
-            └─ jmcomic-swift-dev/   开发副本（测试用）
+JMComic-release/
+├── macOS/JMComic.app        ← 拖入「应用程序」即可使用
+├── iOS/JMComic-iOS.app     ← 未签名，需 Xcode 签名后安装真机
+└── 安装说明.md
 ```
 
-## Java API 库
+- **macOS**：拖入「应用程序」，首次打开在「系统设置 → 隐私与安全性」点「仍要打开」。
+- **iOS**：iOS 包未签名，用 Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，在 Signing & Capabilities 选自己的 Team（免费 Apple ID 即可）后运行到真机。免费签名有效期 7 天。
 
-`mvn -Dgpg.skip=true -DskipTests compile` 构建；提供专辑/章节/搜索/收藏等数据访问接口。
+## ✨ 功能
 
-## macOS 阅读器（jmcomic-swift）
+### 🖥️ macOS 阅读器
 
-原生 SwiftUI 阅读器，**零第三方依赖**，含局域网 Web 服务与 GitHub 同步。
+- **阅读**：连续滚动 / 单页翻书、键盘翻页、双击放大、沉浸顶栏、跳页条、断点续读
+- **浏览**：热门 / 最新 / 历史 / 最近浏览 / 收藏 / 分类（多选精准筛选）/ 为你推荐（本地画像）
+- **本地**：收藏分组、整本下载（CBZ / 散图）、目录扫描导入、内容过滤（不感兴趣标签）
+- **局域网**：手机扫码阅读、在线设备管理、设备信任开关（不信任设备只读）
+- **安全**：AES 加密存储（密钥在钥匙串）、一次性入场 token、密码限流、可选 HTTPS
+- **同步**：GitHub 私有仓库加密备份（收藏 + 历史 + 进度），换机一条命令恢复
 
-### 构建
+### 📱 iOS 应用
+
+- 浏览 / 阅读 / 收藏 / 本地库，与 Mac 端功能对齐
+- **桌面端同步**：扫描桌面端二维码配对，局域网内阅读桌面端已下载的漫画
+
+## 🔨 构建
+
+### macOS
 
 ```bash
 cd jmcomic-swift
-./build-app.sh --install      # 自检 → 打包 → 安装到 /Applications
-swift run -c release --selfcheck   # 运行自检
+swift run -c release              # 直接运行
+./build-app.sh --install          # 打包并安装到 /Applications
 ```
 
-### 功能
+### iOS
 
-- **阅读**：连续滚动 / 单页翻书、键盘翻页、双击放大、沉浸顶栏、跳页条、断点续读
-- **浏览**：热门/最新/历史/最近浏览/收藏/分类（多选精准筛选）/为你推荐（本地画像）
-- **本地**：收藏分组、整本下载（CBZ/散图）、目录扫描导入、内容过滤（不感兴趣标签）
-- **局域网**：手机扫码阅读、在线设备管理、设备信任开关（不信任设备只读）
-- **安全**：AES 加密存储（密钥在钥匙串）、一次性入场 token、密码限流、可选 HTTPS
-- **同步**：GitHub 私有仓库加密备份（收藏+历史+进度），换机一条命令恢复
+Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，选自己的 Team 后运行到真机；或编译验收（模拟器）：
 
-### 隐私与安全设计
+```bash
+cd jmcomic-ios
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash build.sh
+```
 
-- 历史/收藏/进度全部 AES 加密落盘，密钥在 macOS 钥匙串，文件权限 0600
+## 🧱 架构
+
+```
+jmcomic-swift/Sources/JMComic/
+├── App.swift                入口 + 路由
+├── Core/                    actor 并发核心
+│   ├── JmClient.swift       域名轮换 + 签名请求 + 解密
+│   ├── ImagePipeline.swift  ImageIO 解码 → CGImage 切块重排
+│   ├── ImageStore.swift     内存 LRU + 磁盘缓存 + 请求合并
+│   ├── CryptoStore.swift    AES 加密存储（密钥在钥匙串）
+│   ├── SyncStore.swift      GitHub 私有仓库加密同步
+│   └── ...
+└── UI/                      SwiftUI 视图
+```
+
+**关键设计**：actor 保证并发安全、零依赖、图片解重组不重编码、域名失败自动轮换、AES 密钥落钥匙串且文件权限 0600。
+
+> 详见 [CLAUDE.md](CLAUDE.md) 与 [API.md](API.md)。
+
+## 🔒 隐私与安全
+
+- 历史 / 收藏 / 进度全部 AES 加密落盘，密钥在 macOS 钥匙串，文件权限 `0600`
 - Web 访问三门槛：一次性 token → 短时凭证 → 密码会话（绑定 IP + 限流）
 - 数据同步到自己的 GitHub 私有仓库，仓库里只有密文
 
-## 免责声明
+## ⚠️ 免责声明
 
-本项目仅用于个人技术学习与合法用途。不包含任何内容站点的接口密钥、签名或逆向细节；请勿用于违反法律法规或平台规则的行为，使用者自行承担一切责任。
+本项目仅用于个人技术学习与合法用途。**不包含**任何内容站点的接口密钥、签名或逆向细节；请勿用于违反法律法规或平台规则的行为，使用者自行承担一切责任。
+
+## 📄 License
+
+[MIT](LICENSE) © 2025 JUKOMU

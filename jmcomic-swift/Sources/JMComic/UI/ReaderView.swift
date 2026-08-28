@@ -142,6 +142,7 @@ struct ReaderView: View {
         .onAppear { installKeyboard() }
         .onDisappear {
             if let m = keyboardMonitor { NSEvent.removeMonitor(m); keyboardMonitor = nil }
+            library.flushState()
         }
     }
 

@@ -2,116 +2,72 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project
+
+macOS 原生漫画阅读器。SwiftUI + SwiftPM，零第三方依赖。
+
 ## Commands
 
-Maven multi-module build, Java 17, no Maven wrapper (`mvn` must be on PATH).
-
 ```bash
-# Build everything (skip GPG — signing is bound to the `verify` phase and will otherwise prompt/fail locally)
-mvn -B -ntp -Dgpg.skip=true clean verify
+cd jmcomic-swift
 
-# Fast compile without javadoc/sources/signing
-mvn -Dgpg.skip=true -DskipTests compile
+# 运行（Debug）
+swift run
 
-# Build one module plus its dependencies
-mvn -pl jmcomic-core -am -Dgpg.skip=true -DskipTests package
+# 运行（Release）
+swift run -c release
 
-# Run a single test (JUnit 5 via surefire) — no test sources exist yet
-mvn -pl jmcomic-core test -Dtest=SomeTest#someMethod
+# 运行自检
+swift run -c release --selfcheck
 
-# Desktop app (shaded fat jar; main class io.github.jukomu.jmcomic.desktop.JmDesktopApp)
-mvn -pl jmcomic-desktop-support -am -Dgpg.skip=true -DskipTests package
-./run-desktop.sh
-
-# Docs (MkDocs Material, published to readthedocs)
-pip install -r docs/requirements.txt && mkdocs serve -f docs/mkdocs.yml
+# 打包并安装到 /Applications
+./build-app.sh --install
 ```
-
-CI (`.github/workflows/ci.yml`) runs `mvn -B -ntp -Dgpg.skip=true clean verify` on JDK 17.
-
-## Module graph
-
-```
-jmcomic-api            zero third-party deps — interfaces, records, enums, exceptions, strategies
-  └─ jmcomic-core      the implementation: clients, net, crypto, parsers, cache, download
-       ├─ jmcomic-android-support   ImageProcessor SPI impl for Android (no AWT)
-       ├─ jmcomic-desktop-support   Swing/FlatLaf demo app (macOS-flavored)
-       └─ jmcomic-sample            usage examples — commented out of the parent <modules>
-```
-
-`jmcomic-api` must stay dependency-free — it's published for consumers who only want the contract. Anything needing OkHttp/Gson/Jsoup belongs in `jmcomic-core`.
-
-The version (`1.1.7`) is duplicated across all poms plus `run-desktop.sh`, both READMEs, and several `docs/sources/*.md` files. A version bump has to touch all of them.
-
-`jmcomic-swift/` sits outside the Maven build — a native macOS reader (SwiftPM, `swift run`) that reimplements the protocol rather than calling the Java code. It is not a port of `jmcomic-core`: only the ~8 API endpoints the reader needs are covered, and it deliberately shares no code, so **protocol changes must be applied in both places**. It exists because the Swing app used 3GB RSS and re-encoded every page through a JNI webp path; the Swift build uses ~160MB and decodes via system ImageIO. See its `README.md` for the equivalence proof and the parity checklist.
 
 ## Architecture
 
-### Entry point and client hierarchy
-
-`JmComic.newApiClient(config)` / `JmComic.newHtmlClient(config)` are the only supported construction paths — they build an `OkHttpClient` via `OkHttpBuilder` and wire it to a per-client `CookieManager` and `JmDomainManager` (state is isolated per client instance).
-
 ```
-JmClient + JmDownloadClient (api module)
-  └─ AbstractJmClient          shared: executor, cache, download manager, image download, close()
-       ├─ JmApiClient          mobile-app API, signed requests, AES-encrypted responses  ← preferred
-       └─ JmHtmlClient         scrapes the website with Jsoup
+jmcomic-swift/Sources/JMComic/
+├── App.swift              入口 + 路由
+├── SelfCheck.swift        启动自检
+├── Core/
+│   ├── JmConstants.swift  密钥、域名、UA
+│   ├── JmCrypto.swift     token 签名、AES-ECB 解密、切块数计算
+│   ├── JmClient.swift     actor：域名轮换 + 签名请求 + 解密（失败自动换域名）
+│   ├── JmParser.swift     JSON -> 模型
+│   ├── Models.swift       Album / Chapter / ComicPage
+│   ├── ImagePipeline.swift 解码 + 解重组（全程 CGImage，不重编码）
+│   ├── ImageStore.swift   actor：内存 LRU + 磁盘缓存 + 请求合并 + 宽高比记录
+│   ├── LibraryStore.swift 元数据缓存、阅读进度、历史
+│   ├── CryptoStore.swift  AES 加密存储（密钥在钥匙串）
+│   ├── DownloadStore.swift 下载管理
+│   ├── FavoriteStore.swift 收藏管理
+│   ├── SyncStore.swift    GitHub 私有仓库加密同步
+│   └── Zip.swift          CBZ 打包
+└── UI/
+    ├── BrowseView.swift       封面网格、搜索、热门/最新/历史
+    ├── AlbumDetailView.swift  详情、章节、相关作品
+    ├── ReaderView.swift       连续滚动阅读器
+    ├── FavoritesView.swift    收藏管理
+    ├── CategoriesView.swift   分类筛选
+    ├── RecentView.swift       最近浏览
+    ├── PersonalizedView.swift 为你推荐
+    ├── LocalLibraryView.swift 本地库
+    ├── LocalReaderView.swift  本地阅读
+    └── SettingsView.swift     设置
 ```
 
-Both impls also implement `JmNovelClient` and `JmCreatorClient`. `JmHtmlClient` throws `UnsupportedOperationException` for ~54 methods it cannot serve — when adding a `JmClient` method, implement it in `JmApiClient` and add the explicit unsupported stub (or a real impl) in `JmHtmlClient`.
+## Key Design Decisions
 
-`AbstractJmClient` is `AutoCloseable`; callers use try-with-resources. Its constructor kicks off asynchronous initialization on the internal executor (fetch domains → probe them → start the periodic re-probe → subclass `initialize()`), so the first request may block on `JmDomainManager.blockUntilInitialized()`.
-
-### Domain rotation — the placeholder-host trick
-
-Requests are **not** built against a real host. `AbstractJmClient.newHttpUrlBuilder()` returns a builder pointed at `JmConstants.PLACEHOLDER_HOST` (`jm-placeholder.domain.com`). `RetryAndDomainRedirectInterceptor` recognizes that host and swaps in `domainManager.getBestDomain()` on every attempt, retrying across domains on IOException / 5xx / 403 and reporting success/failure back to the manager. `JmDomainManager` additionally runs a background probe (`DomainProbe`) to evict dead domains.
-
-Consequences: never hardcode a host in a request builder, and any new request path should go through `newHttpUrlBuilder()` to inherit retry + rotation. After login, `loginHost` is pinned to the redirect host so session cookies stay valid.
-
-Domain lists come from the network at runtime: `JmApiClient` decrypts them from `API_URL_DOMAIN_SERVER_LIST`; `JmHtmlClient` scrapes JmPub with a GitHub Pages fallback.
-
-### Request signing and response decryption (API client)
-
-`JmApiClient.executeGetRequest/executePostRequest` stamp a second-resolution timestamp, derive `token = md5(timestamp + secret)` and `tokenparam = "timestamp,appVersion"` via `JmCryptoTool.generateToken`, then attach them as headers. The response `data` field is Base64 + AES-ECB, keyed by `md5(timestamp + APP_DATA_SECRET)` — so **the same timestamp used for signing must be carried into `JmApiResponse`** to decrypt. That's why the timestamp is a constructor arg.
-
-Three different secrets are in play (`APP_TOKEN_SECRET`, `APP_TOKEN_SECRET_2` for the scramble-id endpoint, `API_DOMAIN_SERVER_SECRET` for the domain server). Picking the wrong one yields a decryption failure, not an HTTP error.
-
-`executeGetRequest` also detects the "請先登入會員" response and transparently re-logs-in using the AES-encrypted-in-memory password before retrying once.
-
-### Parsing
-
-`ApiParser` (JSON/Gson) and `HtmlParser` (Jsoup + `ParseHelper` selectors) are static-only classes that turn raw payloads into `jmcomic-api` records. Server responses are loosely typed — the existing code leans on null-tolerant helpers (`getJsonFieldAsString`, `safeParseInt`, `StringUtils.defaultIfBlank`). Match that defensiveness; the upstream site changes shape without notice.
-
-### Image descrambling and the SPI
-
-Downloaded images are sliced into horizontal segments that must be reordered. `JmImageTool.calculateNumSegments` derives the segment count from `scrambleId`/`photoId`/filename MD5 with hardcoded version thresholds (`SCRAMBLE_220980` / `268850` / `421926`). The actual pixel work goes through the `ImageProcessor` SPI: `ServiceLoader` first, then a reflective fallback to `AwtImageProcessor`. Android consumers get `AndroidImageProcessor` registered in `META-INF/services/` — this is why `jmcomic-core` must never reference `java.awt` outside `AwtImageProcessor`.
-
-### Download subsystem
-
-Two parallel APIs over the same machinery:
-
-- **Fire-and-forget**: `downloadAlbum` / `downloadPhoto` overloads, plus the chained `client.download(album).withPath(...).withProgress(...).withExecutor(...).execute()` returning a `DownloadResult` (successes + per-image failures).
-- **Managed tasks**: `createDownloadTask(...)` returns a `BaseDownloadTask` (ALBUM → PHOTO → IMAGE tree) that you submit to `client.downloadManager()`. `AlbumDownloadTask` is itself a `TaskObserver` of its children, aggregating progress and state upward through the 10-state `TaskState` machine.
-
-Path layout is caller-controlled via `IAlbumPathGenerator` / `IPhotoPathGenerator` / `IDownloadPathGenerator`. Images write to a temp file and are atomically moved into place.
-
-Thread pools: a user-supplied `ExecutorService` (`config.executor()`) is never shut down by `close()`; internally created pools are. Note `AbstractJmClient` creates *two* pools when none is supplied — one internal, one for `DownloadManager`.
-
-`CachePool` is an LFU byte-budgeted cache keyed by `CacheKey.of(Class, id)`, used for `JmAlbum`, `JmPhoto`, and favorite pages.
+- **actor-based concurrency**: `JmClient`, `ImageStore`, `CryptoStore` 等核心组件使用 Swift actor 保证线程安全
+- **零依赖**: 所有网络、加密、图片处理均用 Foundation/AppKit 原生 API
+- **图片解重组**: 系统 ImageIO 解码 → CGImage 切块重排，不重编码（比 Java 版更快更清晰）
+- **域名轮换**: 请求不绑定固定域名，失败自动切换（与 Java 版同策略）
+- **加密存储**: AES-GCM 密钥存钥匙串，数据文件权限 0600
 
 ## Conventions
 
-- Code comments, Javadoc, logs, and commit messages are in **Chinese**. Commits follow `type(scope): 中文描述`, e.g. `feat(client): 实现JmHtmlClient#logout 方法`.
-- Class-level Javadoc uses the project's custom tags, registered in the parent pom's javadoc plugin config:
-  ```java
-  /**
-   * @author JUKOMU
-   * @Description: ...
-   * @Project: jmcomic-api-java
-   * @Date: 2025/10/28
-   */
-  ```
-- Public data models in `jmcomic-api` are Java `record`s (immutable); builders (`JmConfiguration.Builder`, `SearchQuery.Builder`, `FavoriteQuery.Builder`, `ForumQuery`) are used for inputs.
-- Exceptions all descend from `JmComicException`: `NetworkException`, `ResponseException`, `ParseResponseException`, `ResourceNotFoundException` (and `AlbumNotFoundException` / `PhotoNotFoundException`).
-- `slf4j-api` only in main code; no logging implementation is imposed on consumers.
-- Work happens on `dev` and merges to `master` via PR.
+- 代码注释使用中文
+- SwiftUI 视图命名后缀 `View`
+- 数据存储类命名后缀 `Store`
+- Core 层组件多为 `actor`，保证并发安全

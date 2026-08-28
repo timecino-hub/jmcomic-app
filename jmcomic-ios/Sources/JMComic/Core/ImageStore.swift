@@ -1,7 +1,8 @@
 import Foundation
 import CoreGraphics
 import ImageIO
-import AppKit
+// iOS 适配：原 import AppKit 仅系误引（本文件只用 CGImage/ImageIO，无任何 AppKit 符号），
+// iOS 上直接去掉即可，算法与逻辑零改动。
 
 // MARK: - O(1) LRU 链表节点
 
