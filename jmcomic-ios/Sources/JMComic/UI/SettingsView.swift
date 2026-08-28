@@ -47,6 +47,10 @@ struct SettingsView: View {
     @State private var cacheSizeText = "计算中…"
     @State private var localSizeText = "计算中…"
 
+    // 版本更新检查
+    @State private var updateInfo: UpdateInfo?
+    @State private var checkingUpdate = false
+
     var body: some View {
         Form {
             preferenceSection
@@ -72,6 +76,21 @@ struct SettingsView: View {
             }
         }
         .task { await refreshCacheSize() }
+        .alert("发现新版本",
+               isPresented: Binding(get: { updateInfo != nil },
+                                    set: { if !$0 { updateInfo = nil } })) {
+            if let info = updateInfo {
+                Button("前往下载") {
+                    UIApplication.shared.open(info.htmlURL)
+                    updateInfo = nil
+                }
+                Button("稍后", role: .cancel) { updateInfo = nil }
+            }
+        } message: {
+            if let info = updateInfo {
+                Text("\(info.releaseName)\n当前版本 \(UpdateChecker.currentVersion) → 最新版本 \(info.latestVersion)")
+            }
+        }
     }
 
     // MARK: - 本地偏好
@@ -228,6 +247,31 @@ struct SettingsView: View {
                 Spacer()
                 Text("\(downloads.library.count) 本").foregroundStyle(.secondary).font(.caption)
             }
+            LabeledContent("当前版本", value: UpdateChecker.currentVersion)
+            HStack {
+                if checkingUpdate {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Button {
+                    Task { await checkForUpdate() }
+                } label: {
+                    Text(checkingUpdate ? "检查中…" : "检查更新")
+                }
+                .disabled(checkingUpdate)
+            }
+        }
+    }
+
+    /// 手动检查更新：有新版本则弹窗，无新版本或失败则用 flash 提示。
+    private func checkForUpdate() async {
+        checkingUpdate = true
+        let result = await UpdateChecker.checkForUpdate()
+        checkingUpdate = false
+        if let info = result {
+            updateInfo = info
+        } else {
+            flash("已是最新版本", error: false)
         }
     }
 

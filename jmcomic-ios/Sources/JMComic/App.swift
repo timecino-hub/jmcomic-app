@@ -14,6 +14,10 @@ struct JMComicApp: App {
     @State private var browsePath: [Route] = []
     @State private var favPath: [Route] = []
 
+    // 版本更新检查
+    @State private var updateInfo: UpdateInfo?
+    private let skippedUpdateKey = "skippedUpdateVersion"
+
     var body: some Scene {
         WindowGroup {
             TabView {
@@ -40,7 +44,36 @@ struct JMComicApp: App {
             .onAppear {
                 // 与 Mac 端一致：启动即挑选最优域名，首屏请求更快
                 Task { await JmClient.shared.bootstrap() }
+                // 独立检查版本更新，不阻塞 bootstrap
+                Task { await checkForUpdate() }
+            }
+            .alert("发现新版本",
+                   isPresented: Binding(get: { updateInfo != nil },
+                                        set: { if !$0 { updateInfo = nil } })) {
+                if let info = updateInfo {
+                    Button("前往下载") {
+                        UIApplication.shared.open(UpdateChecker.repoReleasesURL)
+                        updateInfo = nil
+                    }
+                    Button("稍后", role: .cancel) {
+                        // 记住跳过的版本，下次启动不再弹同一版本
+                        UserDefaults.standard.set(info.latestVersion, forKey: skippedUpdateKey)
+                        updateInfo = nil
+                    }
+                }
+            } message: {
+                if let info = updateInfo {
+                    Text("\(info.releaseName)\n当前版本 \(UpdateChecker.currentVersion) → 最新版本 \(info.latestVersion)")
+                }
             }
         }
+    }
+
+    /// 启动时检查版本更新；若该版本已被用户跳过则不再弹窗。
+    private func checkForUpdate() async {
+        guard let info = await UpdateChecker.checkForUpdate() else { return }
+        let skipped = UserDefaults.standard.string(forKey: skippedUpdateKey)
+        guard skipped != info.latestVersion else { return }
+        await MainActor.run { updateInfo = info }
     }
 }

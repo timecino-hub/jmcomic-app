@@ -221,64 +221,96 @@ final class DownloadStore: ObservableObject {
     }
 
     /// 下一整话并落盘。返回 nil 表示这话完全失败。
+    ///
+    /// 两阶段实现，目的：用满 ImageStore 内部 networkSlots=6 的并发限流。
+    /// - 阶段1：通过 TaskGroup 并发拉取本章所有页面，串行 await 时每页都要等
+    ///   网络+解码才进下一页，并发槽根本用不满；这里同时发起全部请求，
+    ///   由 ImageStore 自己控制并发度。结果按原页序存入 images[i]，
+    ///   收集时按完成数更新进度，进度条实时刷新。
+    /// - 阶段2：encode + 落盘放到 Task.detached 后台执行，
+    ///   避免 CGImageDestination 逐页编码卡主线程。
+    /// 取消：在阶段1的收集循环里检查 task.cancelled，取消则停止收集、
+    ///   不进阶段2、不创建任何临时文件，直接返回 nil。
     private func writeChapter(album: Album, meta: ChapterMeta, chapter: Chapter,
                               into dir: URL, format fmt: DownloadFormat) async -> DownloadedChapter? {
         let name = Self.sanitize(meta.displayTitle)
-        var written = 0
+        let total = chapter.pages.count
+        let albumId = album.id   // 捕获到局部，子任务避免捕获 self
 
-        if fmt == .cbz {
-            let target = dir.appendingPathComponent("\(name).cbz")
-            // 先写 .part，成功后再改名，中断不会留下半个坏归档
-            let temp = dir.appendingPathComponent("\(name).cbz.part")
-            guard let zip = try? ZipWriter(url: temp) else { return nil }
-
+        // 阶段1：并发下载（保序收集）
+        // addTask 闭包脱离 main actor，仅捕获 Sendable 的 page；
+        // for await 迭代回到 main actor，可同步调用 self.update / task(for:)。
+        var images: [CGImage?] = Array(repeating: nil, count: total)
+        await withTaskGroup(of: (Int, CGImage?).self) { group in
             for (i, page) in chapter.pages.enumerated() {
-                if task(for: album.id)?.cancelled == true {
-                    try? zip.finish()
+                group.addTask {
+                    let img = await ImageStore.shared.page(page)
+                    return (i, img)
+                }
+            }
+            for await (i, img) in group {
+                // 取消：已取消则不再收集，结束整个 group（已下载的 images 不落盘）
+                if task(for: albumId)?.cancelled == true {
+                    group.cancelAll()
+                    return
+                }
+                images[i] = img
+                update(albumId) {
+                    $0.done += 1
+                    if img == nil { $0.failed += 1 }
+                }
+            }
+        }
+        // 下载被取消：未进入阶段2，无临时文件需清理
+        guard task(for: album.id)?.cancelled != true else { return nil }
+
+        // 阶段2：保序写入（后台线程，避免逐页 encode 卡 UI）
+        // 捕获的全是值类型或不可变引用，Sendable 安全。
+        let chapterId = meta.id
+        let chapterTitle = meta.displayTitle
+        let chapterSort = meta.sort
+        let result: DownloadedChapter? = await _Concurrency.Task.detached(priority: .utility) { () -> DownloadedChapter? in
+            switch fmt {
+            case .cbz:
+                // 先写 .part，成功后再改名，中断不会留下半个坏归档
+                let target = dir.appendingPathComponent("\(name).cbz")
+                let temp = dir.appendingPathComponent("\(name).cbz.part")
+                guard let zip = try? ZipWriter(url: temp) else { return nil }
+                var written = 0
+                // 按 images 下标顺序写入，跳过下载失败的 nil 页
+                for (i, img) in images.enumerated() {
+                    guard let img, let data = Self.encode(img, as: .jpeg) else { continue }
+                    let entry = String(format: "%04d.jpg", i + 1)
+                    try? zip.add(name: entry, data: data)
+                    written += 1
+                }
+                try? zip.finish()
+                guard written > 0 else {
                     try? FileManager.default.removeItem(at: temp)
                     return nil
                 }
-                guard let image = await ImageStore.shared.page(page),
-                      let data = Self.encode(image, as: .jpeg) else {
-                    update(album.id) { $0.failed += 1; $0.done += 1 }
-                    continue
+                try? FileManager.default.removeItem(at: target)
+                try? FileManager.default.moveItem(at: temp, to: target)
+                return DownloadedChapter(chapterId: chapterId, chapterTitle: chapterTitle,
+                                         sort: chapterSort, path: target.path,
+                                         pageCount: written, format: .cbz)
+            case .folder:
+                let target = dir.appendingPathComponent(name, isDirectory: true)
+                try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+                var written = 0
+                for (i, img) in images.enumerated() {
+                    guard let img, let data = Self.encode(img, as: .png) else { continue }
+                    let file = target.appendingPathComponent(String(format: "%04d.png", i + 1))
+                    try? data.write(to: file, options: .atomic)
+                    written += 1
                 }
-                let entry = String(format: "%04d.jpg", i + 1)
-                try? zip.add(name: entry, data: data)
-                written += 1
-                update(album.id) { $0.done += 1 }
+                guard written > 0 else { return nil }
+                return DownloadedChapter(chapterId: chapterId, chapterTitle: chapterTitle,
+                                         sort: chapterSort, path: target.path,
+                                         pageCount: written, format: .folder)
             }
-
-            try? zip.finish()
-            guard written > 0 else {
-                try? FileManager.default.removeItem(at: temp)
-                return nil
-            }
-            try? FileManager.default.removeItem(at: target)
-            try? FileManager.default.moveItem(at: temp, to: target)
-            return DownloadedChapter(chapterId: meta.id, chapterTitle: meta.displayTitle,
-                                     sort: meta.sort, path: target.path,
-                                     pageCount: written, format: .cbz)
-        }
-
-        let target = dir.appendingPathComponent(name, isDirectory: true)
-        try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-        for (i, page) in chapter.pages.enumerated() {
-            if task(for: album.id)?.cancelled == true { return nil }
-            guard let image = await ImageStore.shared.page(page),
-                  let data = Self.encode(image, as: .png) else {
-                update(album.id) { $0.failed += 1; $0.done += 1 }
-                continue
-            }
-            let file = target.appendingPathComponent(String(format: "%04d.png", i + 1))
-            try? data.write(to: file, options: .atomic)
-            written += 1
-            update(album.id) { $0.done += 1 }
-        }
-        guard written > 0 else { return nil }
-        return DownloadedChapter(chapterId: meta.id, chapterTitle: meta.displayTitle,
-                                 sort: meta.sort, path: target.path,
-                                 pageCount: written, format: .folder)
+        }.value
+        return result
     }
 
     // MARK: - 扫描导入（换机器/恢复备份：把外部目录里的 CBZ/散图重新纳入索引）
@@ -448,7 +480,10 @@ final class DownloadStore: ObservableObject {
 
     /// JPEG 质量 0.92：比 PNG 小 5~8 倍，肉眼几乎看不出差别。
     /// 散图走 PNG 无损，因为选散图的人多半是要拿去二次处理。
-    static func encode(_ image: CGImage, as type: UTType) -> Data? {
+    ///
+    /// nonisolated：纯计算函数（仅局部的 NSMutableData + CGImageDestination C 调用，
+    /// 入参 CGImage/UTType 均 Sendable），需在后台 detached task 里调用以避免卡主线程。
+    nonisolated static func encode(_ image: CGImage, as type: UTType) -> Data? {
         let out = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(
             out, type.identifier as CFString, 1, nil) else { return nil }

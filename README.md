@@ -14,6 +14,7 @@
   <img alt="macOS" src="https://img.shields.io/badge/macOS-14.0%2B-000000?logo=apple&logoColor=white" />
   <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0%2B-000000?logo=apple&logoColor=white" />
   <img alt="Release" src="https://img.shields.io/github/v/release/yxxbc/jmcomic-app?include_prereleases" />
+  <a href="https://linux.do" title="linux.do · 新的理想型社区"><img alt="linux.do" src="assets/linuxdo-badge.svg" /></a>
 </p>
 
 <p align="center">
@@ -122,6 +123,10 @@ jmcomic-swift/Sources/JMComic/
 
 本项目仅用于个人技术学习与合法用途。**不包含**任何内容站点的接口密钥、签名或逆向细节；请勿用于违反法律法规或平台规则的行为，使用者自行承担一切责任。
 
+# 友情链接
+
+[linux.do](https://linux.do)
+
 ## 📄 License
 
-[MIT](LICENSE) © 2025 JUKOMU
+[MIT](LICENSE) © 2026 JUKOMU、yxxbc
