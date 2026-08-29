@@ -22,7 +22,8 @@ private enum AppSection: String, CaseIterable, Identifiable {
 /// iOS / iPadOS 通用入口。
 ///
 /// - iPhone 与 iPad 分屏窄窗口：底部 TabView。
-/// - 11 英寸 iPad 的常规宽度窗口：NavigationSplitView 侧边栏。
+/// - 11 英寸 iPad 竖屏：默认收起侧边栏，让漫画网格使用完整宽度。
+/// - iPad 横屏：NavigationSplitView 侧边栏常驻。
 /// - 每个窗口都持有独立的选择和导航路径，支持 iPadOS 多窗口与台前调度。
 @main
 struct JMComicApp: App {
@@ -40,17 +41,35 @@ private struct JMComicRootView: View {
     @State private var browsePath: [Route] = []
     @State private var favoritePath: [Route] = []
     @State private var didStart = false
+    @State private var splitVisibility: NavigationSplitViewVisibility = .all
+    /// 只在窗口形态真正改变时更新默认值，避免覆盖用户手动展开/收起侧边栏的选择。
+    @State private var lastPrefersHiddenSidebar: Bool?
 
     // 版本更新检查
     @State private var updateInfo: UpdateInfo?
     private let skippedUpdateKey = "skippedUpdateVersion"
 
     var body: some View {
-        Group {
-            if horizontalSizeClass == .regular {
-                iPadLayout
-            } else {
-                compactLayout
+        GeometryReader { geometry in
+            let prefersHiddenSidebar = geometry.size.height >= geometry.size.width
+                || geometry.size.width < 900
+
+            Group {
+                if horizontalSizeClass == .regular {
+                    iPadLayout
+                } else {
+                    compactLayout
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                syncSplitVisibility(prefersHiddenSidebar: prefersHiddenSidebar)
+            }
+            .onChange(of: prefersHiddenSidebar) { _, newValue in
+                syncSplitVisibility(prefersHiddenSidebar: newValue)
+            }
+            .onChange(of: horizontalSizeClass) { _, _ in
+                syncSplitVisibility(prefersHiddenSidebar: prefersHiddenSidebar)
             }
         }
         .onAppear {
@@ -81,9 +100,9 @@ private struct JMComicRootView: View {
         }
     }
 
-    /// iPad 常规宽度：稳定的侧边栏 + 内容区，适配 4:3 横竖屏。
+    /// iPad 常规宽度：横屏显示侧边栏；竖屏先显示完整内容，系统按钮可随时展开侧栏。
     private var iPadLayout: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitVisibility) {
             List(selection: sidebarSelection) {
                 ForEach(AppSection.allCases) { section in
                     Label(section.rawValue, systemImage: section.icon)
@@ -96,6 +115,18 @@ private struct JMComicRootView: View {
             sectionView(selection)
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    /// 竖屏和不足 900 pt 的窗口优先保留内容宽度；横屏宽窗口恢复双栏。
+    /// lastPrefersHiddenSidebar 让用户在同一窗口形态下仍能自由控制侧边栏。
+    private func syncSplitVisibility(prefersHiddenSidebar: Bool) {
+        guard horizontalSizeClass == .regular else {
+            lastPrefersHiddenSidebar = nil
+            return
+        }
+        guard lastPrefersHiddenSidebar != prefersHiddenSidebar else { return }
+        lastPrefersHiddenSidebar = prefersHiddenSidebar
+        splitVisibility = prefersHiddenSidebar ? .detailOnly : .all
     }
 
     /// List 的单选绑定是可选值；拒绝 nil，保证内容区始终有一个可见功能区。
