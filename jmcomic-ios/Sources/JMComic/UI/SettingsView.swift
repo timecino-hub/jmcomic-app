@@ -15,9 +15,15 @@ struct SettingsView: View {
     @ObservedObject private var library = LibraryStore.shared
     @ObservedObject private var favorites = FavoriteStore.shared
     @ObservedObject private var downloads = DownloadStore.shared
+    @ObservedObject private var account = JmAccountStore.shared
 
     @State private var notice: String?
     @State private var isError = false
+    @State private var jmUsername = ""
+    @State private var jmPassword = ""
+    @State private var showInitialSyncPrompt = false
+    @State private var showLogoutConfirm = false
+    @State private var syncTask: Task<Void, Never>?
 
     // 阅读器默认单页模式
     @State private var defaultSinglePage = UserDefaults.standard.bool(forKey: "readerSinglePage") {
@@ -53,6 +59,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            jmAccountSection
             preferenceSection
             filterSection
             storageSection
@@ -89,6 +96,122 @@ struct SettingsView: View {
         } message: {
             if let info = updateInfo {
                 Text("\(info.releaseName)\n当前版本 \(UpdateChecker.currentVersion) → 最新版本 \(info.latestVersion)")
+            }
+        }
+        .confirmationDialog("登录成功", isPresented: $showInitialSyncPrompt,
+                            titleVisibility: .visible) {
+            Button("立即同步云端收藏") { startFavoriteSync() }
+            Button("稍后", role: .cancel) {}
+        } message: {
+            Text("同步只会把云端收藏增量导入本地，不会覆盖、删除或上传本地收藏。")
+        }
+        .confirmationDialog("退出 JM 账号？", isPresented: $showLogoutConfirm,
+                            titleVisibility: .visible) {
+            Button("退出登录", role: .destructive) {
+                syncTask?.cancel()
+                account.logout()
+                jmUsername = ""
+                jmPassword = ""
+                flash("已退出 JM 账号；导入的本地收藏仍会保留", error: false)
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只会删除本机钥匙串中的 JM 会话，不会删除收藏。")
+        }
+    }
+
+    // MARK: - JM 账号与云端收藏
+
+    private var jmAccountSection: some View {
+        Section("JM 账号与云端收藏") {
+            if let profile = account.profile {
+                LabeledContent("账号", value: profile.username)
+                if !profile.email.isEmpty {
+                    LabeledContent("邮箱", value: profile.email)
+                }
+                LabeledContent("云端收藏", value: "\(profile.cloudFavoriteCount) 条")
+
+                if account.isSyncing {
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small)
+                        Text(account.syncProgress ?? "正在同步…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Button("取消同步", role: .cancel) { syncTask?.cancel() }
+                } else {
+                    Button {
+                        startFavoriteSync()
+                    } label: {
+                        Label("同步云端收藏到本地", systemImage: "icloud.and.arrow.down")
+                    }
+                }
+
+                if let date = account.lastSyncDate {
+                    LabeledContent("上次同步",
+                                   value: date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button("退出登录", role: .destructive) { showLogoutConfirm = true }
+                    .disabled(account.isSyncing)
+            } else {
+                TextField("JM 用户名", text: $jmUsername)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .disabled(account.isLoggingIn)
+                SecureField("JM 密码", text: $jmPassword)
+                    .textContentType(.password)
+                    .disabled(account.isLoggingIn)
+                Button {
+                    startLogin()
+                } label: {
+                    HStack(spacing: 8) {
+                        if account.isLoggingIn { ProgressView().controlSize(.small) }
+                        Text(account.isLoggingIn ? "登录中…" : "登录")
+                    }
+                }
+                .disabled(account.isLoggingIn
+                          || jmUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || jmPassword.isEmpty)
+            }
+
+            Text("使用 JM 网页版同一账号。密码不会保存；同步仅从云端增量导入，已有本地收藏不移动、不覆盖、不删除。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func startLogin() {
+        let username = jmUsername
+        let password = jmPassword
+        // 请求开始后立即清空视图状态；密码不会进入 UserDefaults 或账号模型。
+        jmPassword = ""
+        Task {
+            do {
+                try await account.login(username: username, password: password)
+                flash("JM 账号登录成功", error: false)
+                showInitialSyncPrompt = true
+            } catch {
+                flash(error.localizedDescription, error: true)
+            }
+        }
+    }
+
+    private func startFavoriteSync() {
+        guard syncTask == nil, !account.isSyncing else { return }
+        syncTask = Task {
+            defer { syncTask = nil }
+            do {
+                let result = try await account.syncFavorites()
+                flash("同步完成：新增 \(result.added) 条，已有 \(result.skipped) 条，新增分组 \(result.foldersAdded) 个",
+                      error: false)
+            } catch is CancellationError {
+                flash("已取消同步，本地收藏没有变化", error: false)
+            } catch {
+                flash(error.localizedDescription, error: true)
             }
         }
     }
