@@ -82,7 +82,8 @@ enum JmParser {
 
     static func parseFavoritePage(_ json: [String: Any], page: Int) -> JmFavoritePage {
         let items = (json["list"] as? [[String: Any]] ?? []).map(meta)
-        let folders = (json["folder_list"] as? [[String: Any]] ?? []).compactMap { item in
+        let folders: [JmFavoriteFolder] = (json["folder_list"] as? [[String: Any]] ?? [])
+            .compactMap { item -> JmFavoriteFolder? in
             let id = string(item, "FID").isEmpty ? string(item, "id") : string(item, "FID")
             let name = string(item, "name")
             guard !id.isEmpty, !name.isEmpty else { return nil }

@@ -115,7 +115,7 @@ actor JmClient {
                              preferredHost: String? = nil,
                              authenticated: Bool = false,
                              secret: String = JmConstants.tokenSecret) async throws -> JSONResponse {
-        try await bootstrap()
+        await bootstrap()
         var lastError: Error = JmError.noDomain
 
         var hosts = orderedDomains
@@ -198,8 +198,14 @@ actor JmClient {
                         ?? ""
                     if path == "login" { throw JmError.invalidCredentials(message) }
                     if authenticated {
-                        lastError = JmError.sessionExpired
-                        continue
+                        let normalized = message.lowercased()
+                        let indicatesExpiredSession = apiCode == 401 || apiCode == 403
+                            || normalized.contains("login") || normalized.contains("member")
+                            || message.contains("登录") || message.contains("登入")
+                        if indicatesExpiredSession {
+                            lastError = JmError.sessionExpired
+                            continue
+                        }
                     }
                     throw JmError.api(message)
                 }
