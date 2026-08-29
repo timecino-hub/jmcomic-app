@@ -74,7 +74,8 @@ final class FavoriteStore: ObservableObject {
         else { return false }
         do {
             try enc.write(to: file, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            // 加密写盘已经成功；权限收紧失败不应让内存与磁盘状态分叉。
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             return true
         } catch {
             return false
