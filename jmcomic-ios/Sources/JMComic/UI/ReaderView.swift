@@ -237,6 +237,7 @@ struct ReaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+        .frame(maxWidth: JMLayout.readerToolbarMaxWidth)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 10)
@@ -265,6 +266,7 @@ struct ReaderView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
+                .frame(maxWidth: JMLayout.readerJumpBarMaxWidth)
                 .background(.ultraThinMaterial)
                 .clipShape(Capsule())
                 .padding(.horizontal, 12)
@@ -362,6 +364,9 @@ struct ReaderView: View {
 
     private func pageList(_ chapter: Chapter) -> some View {
         GeometryReader { geo in
+            let pageWidth = singlePage
+                ? geo.size.width
+                : min(geo.size.width, JMLayout.readerContinuousMaxWidth)
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
@@ -374,7 +379,7 @@ struct ReaderView: View {
 
                         ForEach(Array(chapter.pages.enumerated()), id: \.element.id) { index, page in
                             PageCell(page: page,
-                                     width: geo.size.width,
+                                     width: pageWidth,
                                      ratio: ratio(page),
                                      viewport: singlePage ? geo.size : nil)
                                 .id(index)
@@ -394,6 +399,7 @@ struct ReaderView: View {
                         }
                         nextChapterFooter
                     }
+                    .frame(width: pageWidth)
                     .frame(maxWidth: .infinity)
                     .scrollPosition(id: $scrollTarget)
                 }

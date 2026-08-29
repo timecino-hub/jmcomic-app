@@ -9,6 +9,7 @@ import UIKit
 /// 复制 ID 用 UIPasteboard；下载格式选择改用确认菜单。
 struct AlbumDetailView: View {
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let meta: AlbumMeta
     @Binding var path: [Route]
 
@@ -99,7 +100,7 @@ struct AlbumDetailView: View {
                     Text("简介").font(.subheadline.weight(.semibold))
                     Text(album.description)
                         .font(.callout)
-                        .lineLimit(8)
+                        .lineLimit(horizontalSizeClass == .regular ? 12 : 8)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -116,11 +117,12 @@ struct AlbumDetailView: View {
             previewSection
         }
         .padding(16)
+        .jmCentered(maxWidth: JMLayout.detailMaxWidth, alignment: .leading)
     }
 
     private func header(_ album: Album) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            CoverImage(albumId: album.id, width: 110)
+            CoverImage(albumId: album.id, width: horizontalSizeClass == .regular ? 140 : 110)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(album.title).font(.title3.weight(.semibold)).lineLimit(3)
@@ -232,7 +234,7 @@ struct AlbumDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(album.chapters.count > 1 ? "章节 (\(album.chapters.count))" : "章节")
                     .font(.headline)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
                     ForEach(Array(album.chapters.enumerated()), id: \.element.id) { i, c in
                         Button {
                             readingChapter = i

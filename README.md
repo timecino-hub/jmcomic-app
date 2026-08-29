@@ -5,7 +5,7 @@
 <h1 align="center">JMComic</h1>
 
 <p align="center">
-  原生 SwiftUI 漫画阅读器 · macOS + iOS · 零第三方依赖
+  原生 SwiftUI 漫画阅读器 · macOS + iOS / iPadOS · 零第三方依赖
 </p>
 
 <p align="center">
@@ -13,6 +13,7 @@
   <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9-F05138.svg" />
   <img alt="macOS" src="https://img.shields.io/badge/macOS-14.0%2B-000000?logo=apple&logoColor=white" />
   <img alt="iOS" src="https://img.shields.io/badge/iOS-17.0%2B-000000?logo=apple&logoColor=white" />
+  <img alt="iPadOS" src="https://img.shields.io/badge/iPadOS-17.0%2B-000000?logo=apple&logoColor=white" />
   <img alt="Release" src="https://img.shields.io/github/v/release/yxxbc/jmcomic-app?include_prereleases" />
   <a href="https://linux.do" title="linux.do · 新的理想型社区"><img alt="linux.do" src="assets/linuxdo-badge.svg" /></a>
 </p>
@@ -35,7 +36,7 @@
 | 端 | 目录 | 说明 |
 | --- | --- | --- |
 | 🖥️ **macOS** | `jmcomic-swift/` | 完整桌面阅读器，SwiftPM 工程 |
-| 📱 **iOS** | `jmcomic-ios/` | 独立 iPhone 应用，可与桌面端局域网同步 |
+| 📱 **iOS / iPadOS** | `jmcomic-ios/` | iPhone + iPad 通用应用，可与桌面端局域网同步 |
 
 ## 📦 下载安装
 
@@ -44,12 +45,13 @@
 ```
 JMComic-release/
 ├── macOS/JMComic.app        ← 拖入「应用程序」即可使用
-├── iOS/JMComic-iOS.app     ← 未签名，需 Xcode 签名后安装真机
+├── iOS/JMComic-iOS.app                 ← 未签名通用 App
+├── iOS/JMComic-iPadOS-unsigned.ipa     ← 未签名 IPA，签名后可侧载
 └── 安装说明.md
 ```
 
 - **macOS**：拖入「应用程序」，首次打开在「系统设置 → 隐私与安全性」点「仍要打开」。
-- **iOS**：iOS 包未签名，用 Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，在 Signing & Capabilities 选自己的 Team（免费 Apple ID 即可）后运行到真机。免费签名有效期 7 天。
+- **iOS / iPadOS**：包未签名，用 Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，在 Signing & Capabilities 选自己的 Team（免费 Apple ID 即可）后运行到真机。iPad 11 英寸适配与 IPA 说明见 [`jmcomic-ios/IPADOS.md`](jmcomic-ios/IPADOS.md)。
 
 ## ✨ 功能
 
@@ -62,9 +64,10 @@ JMComic-release/
 - **安全**：AES 加密存储（密钥在钥匙串）、一次性入场 token、密码限流、可选 HTTPS
 - **同步**：GitHub 私有仓库加密备份（收藏 + 历史 + 进度），换机一条命令恢复
 
-### 📱 iOS 应用
+### 📱 iOS / iPadOS 应用
 
 - 浏览 / 阅读 / 收藏 / 本地库，与 Mac 端功能对齐
+- iPad 常规宽度侧边栏，支持 11 英寸横竖屏、分屏、台前调度和多窗口
 - **桌面端同步**：扫描桌面端二维码配对，局域网内阅读桌面端已下载的漫画
 
 ## 🔗 上游接口仓库
@@ -85,13 +88,20 @@ swift run -c release              # 直接运行
 ./build-app.sh --install          # 打包并安装到 /Applications
 ```
 
-### iOS
+### iOS / iPadOS
 
-Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，选自己的 Team 后运行到真机；或编译验收（模拟器）：
+Xcode 打开 `jmcomic-ios/jmcomic-ios.xcodeproj`，选自己的 Team 后运行到 iPhone / iPad；或编译验收（模拟器）：
 
 ```bash
 cd jmcomic-ios
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash build.sh
+```
+
+生成待签名的通用 IPA：
+
+```bash
+cd jmcomic-ios
+./package-ipados.sh
 ```
 
 ## 🧱 架构

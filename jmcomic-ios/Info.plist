@@ -10,6 +10,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在同一局域网内连接 JMComic 桌面端并同步漫画、收藏与阅读进度。</string>
 	<key>CFBundleDisplayName</key>
 	<string>JMComic</string>
 </dict>

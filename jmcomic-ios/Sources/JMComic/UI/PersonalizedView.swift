@@ -88,6 +88,7 @@ struct PersonalizedView: View {
                 }
             }
             .padding(16)
+            .jmCentered()
         }
     }
 

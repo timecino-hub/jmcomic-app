@@ -43,8 +43,8 @@ jobs:
                     # 产物：jmcomic-swift/dist/JMComic.app
                     test -d dist/JMComic.app && echo "macOS app 构建成功"
 
-            # ---------- 2. 构建 iOS App（未签名，用户用 Xcode 自行签名安装真机）----------
-            -   name: Build iOS app (unsigned)
+            # ---------- 2. 构建 iPhone + iPad 通用 App（未签名）----------
+            -   name: Build iOS and iPadOS app (unsigned)
                 run: |
                     cd jmcomic-ios
                     xcodebuild \
@@ -58,10 +58,10 @@ jobs:
                         CODE_SIGN_IDENTITY="" \
                         DEVELOPMENT_TEAM="" \
                         build | tail -20
-                    APP=$(find build/Build/Products -name "*.app" -maxdepth 3 | head -1)
+                    APP=$(find build/Build/Products -type d -name "*.app" | head -1)
                     test -n "$APP" && echo "iOS app 构建成功：$APP"
 
-            # ---------- 3. 打包为 zip（macOS app + iOS app + 安装说明）----------
+            # ---------- 3. 打包 zip，并额外生成标准 Payload 结构的未签名 IPA ----------
             -   name: Package release zip
                 run: |
                     TAG="${{ inputs.tag || github.ref_name }}"
@@ -70,8 +70,15 @@ jobs:
                     mkdir -p "$STAGE/macOS" "$STAGE/iOS"
 
                     cp -R jmcomic-swift/dist/JMComic.app "$STAGE/macOS/"
-                    iOS_APP=$(find jmcomic-ios/build/Build/Products -name "*.app" -maxdepth 3 | head -1)
+                    iOS_APP=$(find jmcomic-ios/build/Build/Products -type d -name "*.app" | head -1)
                     cp -R "$iOS_APP" "$STAGE/iOS/"
+
+                    IPA="JMComic-${TAG}-iPadOS-unsigned.ipa"
+                    IPA_STAGE=$(mktemp -d "$RUNNER_TEMP/jmcomic-ipa.XXXXXX")
+                    mkdir -p "$IPA_STAGE/Payload"
+                    cp -R "$iOS_APP" "$IPA_STAGE/Payload/"
+                    (cd "$IPA_STAGE" && ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/$IPA")
+                    cp "$IPA" "$STAGE/iOS/JMComic-iPadOS-unsigned.ipa"
 
                     cat > "$STAGE/安装说明.md" <<'DOC'
                     # JMComic 安装说明
@@ -80,13 +87,14 @@ jobs:
                     将 `macOS/JMComic.app` 拖入「应用程序」文件夹即可。
                     首次打开若提示「无法验证开发者」，在「系统设置 → 隐私与安全性」点「仍要打开」。
 
-                    ## iOS（JMComic-iOS.app）
-                    iOS 包**未签名**，需用 Xcode 自行签名后安装到真机：
-                    1. 用数据线连接 iPhone 并解锁，开启「设置 → 隐私与安全性 → 开发者模式」
+                    ## iOS / iPadOS（JMComic-iOS.app / JMComic-iPadOS-unsigned.ipa）
+                    两个包都**未签名**，需用自己的 Apple ID 或开发者证书签名后安装：
+                    1. 连接 iPhone 或 iPad 并解锁，开启「设置 → 隐私与安全性 → 开发者模式」
                     2. Xcode 打开本仓库的 `jmcomic-ios/jmcomic-ios.xcodeproj`
                     3. 选中目标 → Signing & Capabilities → 勾选 Automatically manage signing → Team 选自己的 Apple ID（免费即可）
                     4. 选择真机后点 ▶ 运行；或终端执行 `cd jmcomic-ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash build.sh`
-                    5. 手机上信任开发者：设置 → 通用 → VPN与设备管理
+                    5. 在设备上信任开发者：设置 → 通用 → VPN与设备管理
+                    6. IPA 也可以交给 AltStore、Sideloadly 等可信签名工具处理；未签名 IPA 不能直接点开安装
                     > 免费 Apple ID 签名有效期 7 天，到期重新运行即可。
 
                     更多说明见仓库 README。
@@ -104,6 +112,8 @@ jobs:
                     draft: false
                     prerelease: ${{ inputs.prerelease || contains(github.ref, '-') }}
                     generate_release_notes: true
-                    files: JMComic-*.zip
+                    files: |
+                        JMComic-*.zip
+                        JMComic-*-iPadOS-unsigned.ipa
                 env:
                     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

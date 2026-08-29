@@ -84,6 +84,7 @@ struct CategoriesView: View {
             }
             .padding(.top, 8)
             .padding(.bottom, 24)
+            .jmCentered(alignment: .leading)
         }
         .navigationTitle("分类")
         .navigationBarTitleDisplayMode(.inline)

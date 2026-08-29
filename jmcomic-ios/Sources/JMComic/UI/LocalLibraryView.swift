@@ -109,6 +109,7 @@ struct LocalLibraryView: View {
                 }
             }
             .padding(16)
+            .jmCentered()
         }
     }
 }
@@ -160,12 +161,16 @@ struct LocalAlbumDetailView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("章节 (\(album.chapters.count))").font(.headline)
-                    ForEach(album.chapters) { c in
-                        chapterRow(c, currentChapterID: currentChapterID)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)],
+                              alignment: .leading, spacing: 12) {
+                        ForEach(album.chapters) { c in
+                            chapterRow(c, currentChapterID: currentChapterID)
+                        }
                     }
                 }
             }
             .padding(16)
+            .jmCentered(maxWidth: JMLayout.detailMaxWidth, alignment: .leading)
         }
         .navigationTitle(album.meta.title)
         .navigationBarTitleDisplayMode(.inline)

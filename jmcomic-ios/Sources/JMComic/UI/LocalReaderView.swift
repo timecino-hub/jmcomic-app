@@ -119,6 +119,7 @@ struct LocalReaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+        .frame(maxWidth: JMLayout.readerToolbarMaxWidth)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 10)
@@ -147,6 +148,7 @@ struct LocalReaderView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
+                .frame(maxWidth: JMLayout.readerJumpBarMaxWidth)
                 .background(.ultraThinMaterial)
                 .clipShape(Capsule())
                 .padding(.horizontal, 12)
@@ -308,11 +310,14 @@ struct LocalReaderView: View {
 
     private var pageList: some View {
         GeometryReader { geo in
+            let pageWidth = singlePage
+                ? geo.size.width
+                : min(geo.size.width, JMLayout.readerContinuousMaxWidth)
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(pages.enumerated()), id: \.element) { index, url in
-                            LocalPageCell(url: url, width: geo.size.width,
+                            LocalPageCell(url: url, width: pageWidth,
                                           viewport: singlePage ? geo.size : nil)
                                 .id(index)
                                 .onAppear {
@@ -324,6 +329,7 @@ struct LocalReaderView: View {
                                 }
                         }
                     }
+                    .frame(width: pageWidth)
                     .frame(maxWidth: .infinity)
                     .scrollPosition(id: $scrollTarget)
                 }

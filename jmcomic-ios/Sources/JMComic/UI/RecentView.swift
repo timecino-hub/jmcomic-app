@@ -34,6 +34,7 @@ struct RecentView: View {
                         }
                     }
                     .padding(16)
+                    .jmCentered()
                 }
             }
         }

@@ -1,0 +1,67 @@
+name: iPadOS 11-inch Build
+
+on:
+    push:
+        branches:
+            - "codex/ipados-11inch"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ipados-11inch-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build-ipados:
+        runs-on: macos-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v4
+
+            -   name: Select Xcode
+                run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+            -   name: Build universal iPhone and iPad app
+                working-directory: jmcomic-ios
+                run: |
+                    set -euo pipefail
+                    xcodebuild \
+                        -project jmcomic-ios.xcodeproj \
+                        -scheme JMComic-iOS \
+                        -destination 'generic/platform=iOS' \
+                        -derivedDataPath build \
+                        -configuration Release \
+                        CODE_SIGNING_ALLOWED=NO \
+                        CODE_SIGNING_REQUIRED=NO \
+                        CODE_SIGN_IDENTITY="" \
+                        DEVELOPMENT_TEAM="" \
+                        build
+
+            -   name: Verify iPad support and package IPA
+                run: |
+                    set -euo pipefail
+                    APP=$(find jmcomic-ios/build/Build/Products/Release-iphoneos -maxdepth 1 -type d -name '*.app' | head -1)
+                    test -n "$APP"
+
+                    FAMILY=$(/usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily' "$APP/Info.plist")
+                    echo "$FAMILY"
+                    echo "$FAMILY" | grep -q '2'
+
+                    IPA="$GITHUB_WORKSPACE/JMComic-iPadOS-11inch-v1.2.1-unsigned.ipa"
+                    IPA_STAGE=$(mktemp -d "$RUNNER_TEMP/jmcomic-ipados.XXXXXX")
+                    mkdir -p "$IPA_STAGE/Payload"
+                    cp -R "$APP" "$IPA_STAGE/Payload/"
+                    (cd "$IPA_STAGE" && ditto -c -k --sequesterRsrc --keepParent Payload "$IPA")
+                    test -s "$IPA"
+                    ls -lh "$IPA"
+
+            -   name: Upload unsigned IPA
+                uses: actions/upload-artifact@v4
+                with:
+                    name: JMComic-iPadOS-11inch-v1.2.1-unsigned
+                    path: JMComic-iPadOS-11inch-v1.2.1-unsigned.ipa
+                    if-no-files-found: error
+                    retention-days: 30

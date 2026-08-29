@@ -2,6 +2,27 @@ import SwiftUI
 import UIKit
 import CoreGraphics
 
+/// iPhone / iPad 共用的响应式宽度上限。
+///
+/// 11 英寸 iPad 横屏的内容区很宽；对网格保留利用率，对长文本、详情和阅读器适度限宽，
+/// 避免控件被拉成一整条，同时不依赖某一代 iPad 的固定像素尺寸。
+enum JMLayout {
+    static let contentMaxWidth: CGFloat = 1120
+    static let detailMaxWidth: CGFloat = 980
+    static let readerContinuousMaxWidth: CGFloat = 900
+    static let readerToolbarMaxWidth: CGFloat = 980
+    static let readerJumpBarMaxWidth: CGFloat = 760
+}
+
+extension View {
+    /// 在宽屏中居中并限制内容行长；窄屏下等同于原来的全宽布局。
+    func jmCentered(maxWidth: CGFloat = JMLayout.contentMaxWidth,
+                    alignment: Alignment = .center) -> some View {
+        frame(maxWidth: maxWidth, alignment: alignment)
+            .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
 /// 路由：各 tab 的 NavigationStack 共用的推入目标。
 /// album 是详情页；后三个是浏览 tab 的二级页（Mac 版侧栏项 → 推入式导航）。
 enum Route: Hashable {

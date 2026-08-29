@@ -140,6 +140,7 @@ struct FavoritesView: View {
             }
         }
         .padding(.horizontal, 16)
+        .jmCentered(alignment: .leading)
     }
 
     // MARK: - 网格
@@ -178,6 +179,7 @@ struct FavoritesView: View {
                     }
                 }
                 .padding(16)
+                .jmCentered()
             }
         }
     }

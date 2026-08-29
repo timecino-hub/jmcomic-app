@@ -10,6 +10,8 @@ import UIKit
 ///   直接 setContentOffset（懒加载场景比 scrollTo 更可靠），逻辑与 Mac 版等价
 struct BrowseView: View {
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private enum Feed: String, CaseIterable, Identifiable {
         case hot = "热门"
         case latest = "最新"
@@ -76,11 +78,13 @@ struct BrowseView: View {
                 entryRow
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
+                    .jmCentered(alignment: .leading)
 
                 gridContent
                     .padding(.top, 12)
 
                 bottomSection
+                    .jmCentered()
             }
             .coordinateSpace(name: "jmfeed")
             .onPreferenceChange(ScrollProbeKey.self) { minY in
@@ -141,7 +145,7 @@ struct BrowseView: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(Color.primary.opacity(0.06), in: Capsule())
-                .frame(width: 132)
+                .frame(width: horizontalSizeClass == .regular ? 220 : 132)
             }
             ToolbarItem(placement: .principal) {
                 Picker("源", selection: $mode) {
@@ -264,6 +268,7 @@ struct BrowseView: View {
             }
         }
         .padding(.horizontal, 16)
+        .jmCentered()
     }
 
     @ViewBuilder
