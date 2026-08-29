@@ -2,7 +2,7 @@ import Foundation
 
 /// 本地收藏。
 ///
-/// 刻意不走服务端收藏夹：不用登录、不受账号封禁影响、也不把口味上传。
+/// 数据始终以本地为准；可选择从 JM 云端收藏做单向增量导入，但绝不反向上传或远程删除。
 /// 支持自建分组（服务端收藏夹要会员才能多建，本地没这限制）。
 ///
 /// 文件就是普通 JSON，导出即备份，想同步到 GitHub 私有库直接拿这个文件。
@@ -16,6 +16,18 @@ final class FavoriteStore: ObservableObject {
         var folder: String
         var addedAt: Date
         var id: String { meta.id }
+    }
+
+    struct CloudImportResult: Sendable {
+        let added: Int
+        let skipped: Int
+        let foldersAdded: Int
+    }
+
+    enum CloudImportError: LocalizedError {
+        case persistFailed
+
+        var errorDescription: String? { "无法安全写入本地收藏，同步结果未应用" }
     }
 
     @Published private(set) var entries: [Entry] = []
@@ -54,13 +66,24 @@ final class FavoriteStore: ObservableObject {
         }
     }
 
-    private func save() {
+    @discardableResult
+    private func persist(entries: [Entry], folders: [String]) -> Bool {
         guard let data = try? JSONEncoder().encode(Payload(entries: entries, folders: folders)),
               let key = CryptoStore.key(),
               let enc = try? CryptoStore.encrypt(data, key: key)
-        else { return }
-        try? enc.write(to: file, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        else { return false }
+        do {
+            try enc.write(to: file, options: .atomic)
+            // 加密写盘已经成功；权限收紧失败不应让内存与磁盘状态分叉。
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func save() {
+        _ = persist(entries: entries, folders: folders)
     }
 
     // MARK: - 查询
@@ -158,5 +181,56 @@ final class FavoriteStore: ObservableObject {
         entries.sort { $0.addedAt > $1.addedAt }
         save()
         return added
+    }
+
+    /// 将已完整拉取的云端快照一次性并入本地。
+    /// 先生成新状态并完成原子写盘，再发布到界面；写盘失败时内存和磁盘都保持原状。
+    func importCloudFavorites(_ items: [JmCloudFavorite]) throws -> CloudImportResult {
+        var nextEntries = entries
+        var nextFolders = folders
+        var knownIDs = Set(entries.map(\.meta.id))
+        var knownFolders = Set(folders)
+        var added = 0
+        var skipped = 0
+        var foldersAdded = 0
+        let now = Date()
+
+        for (index, item) in items.enumerated() {
+            guard !item.meta.id.isEmpty else {
+                skipped += 1
+                continue
+            }
+            guard knownIDs.insert(item.meta.id).inserted else {
+                skipped += 1
+                continue
+            }
+
+            let cleaned = item.folderName
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let remoteName = cleaned.isEmpty ? "默认" : String(cleaned.prefix(60))
+            let localFolder = "JM · \(remoteName)"
+            if knownFolders.insert(localFolder).inserted {
+                nextFolders.append(localFolder)
+                foldersAdded += 1
+            }
+
+            // 用微小时间差保持云端返回顺序，同时让本次导入排在旧收藏前面。
+            let addedAt = now.addingTimeInterval(-Double(index) / 1_000)
+            nextEntries.append(Entry(meta: item.meta, folder: localFolder, addedAt: addedAt))
+            added += 1
+        }
+
+        guard added > 0 else {
+            return CloudImportResult(added: 0, skipped: skipped, foldersAdded: 0)
+        }
+        nextEntries.sort { $0.addedAt > $1.addedAt }
+        guard persist(entries: nextEntries, folders: nextFolders) else {
+            throw CloudImportError.persistFailed
+        }
+        entries = nextEntries
+        folders = nextFolders
+        return CloudImportResult(added: added, skipped: skipped, foldersAdded: foldersAdded)
     }
 }
