@@ -72,3 +72,46 @@ struct PagedAlbums: Sendable {
 
     var hasMore: Bool { page < totalPages }
 }
+
+// MARK: - JM 账号与云端收藏
+
+/// 登录后用于界面展示的最小账号资料。密码永不进入该模型。
+struct JmAccountProfile: Codable, Hashable, Sendable {
+    let uid: String
+    let username: String
+    let email: String
+    let cloudFavoriteCount: Int
+}
+
+/// 登录接口返回的会话。Cookie 只会由 JmAccountStore 写入钥匙串。
+struct JmLoginResult: Sendable {
+    let profile: JmAccountProfile
+    let cookies: [String: String]
+    let preferredHost: String
+}
+
+struct JmFavoriteFolder: Codable, Hashable, Identifiable, Sendable {
+    let id: String
+    let name: String
+}
+
+struct JmFavoritePage: Sendable {
+    let items: [AlbumMeta]
+    let folders: [JmFavoriteFolder]
+    let total: Int
+    let pageSize: Int
+    let page: Int
+
+    var hasMore: Bool {
+        guard !items.isEmpty else { return false }
+        let size = max(pageSize, items.count)
+        if total > 0 { return total > page * size }
+        return pageSize > 0 && items.count >= pageSize
+    }
+}
+
+/// 已完整拉取、等待一次性写入本地收藏的数据。
+struct JmCloudFavorite: Sendable {
+    let meta: AlbumMeta
+    let folderName: String
+}
