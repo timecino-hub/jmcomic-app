@@ -6,7 +6,9 @@ enum JmParser {
     // MARK: - 辅助
 
     private static func string(_ obj: [String: Any], _ key: String) -> String {
-        (obj[key] as? String) ?? ""
+        if let value = obj[key] as? String { return value }
+        if let value = obj[key] as? NSNumber { return value.stringValue }
+        return ""
     }
 
     private static func int(_ obj: [String: Any], _ key: String) -> Int {
@@ -58,6 +60,41 @@ enum JmParser {
         let total = int(json, "total")
         let totalPages = total == 0 ? (content.isEmpty ? 0 : 1) : Int(ceil(Double(total) / 80.0))
         return PagedAlbums(items: content, totalPages: totalPages, page: page)
+    }
+
+    // MARK: - JM 账号与云端收藏
+
+    static func parseAccount(_ json: [String: Any], fallbackUsername: String) throws -> JmAccountProfile {
+        let username = string(json, "username").isEmpty
+            ? fallbackUsername
+            : string(json, "username")
+        guard !username.isEmpty, !string(json, "s").isEmpty else {
+            let message = string(json, "message")
+            throw JmError.invalidCredentials(message.isEmpty ? "登录响应缺少会话信息" : message)
+        }
+        return JmAccountProfile(
+            uid: string(json, "uid"),
+            username: username,
+            email: string(json, "email"),
+            cloudFavoriteCount: int(json, "album_favorites")
+        )
+    }
+
+    static func parseFavoritePage(_ json: [String: Any], page: Int) -> JmFavoritePage {
+        let items = (json["list"] as? [[String: Any]] ?? []).map(meta)
+        let folders = (json["folder_list"] as? [[String: Any]] ?? []).compactMap { item in
+            let id = string(item, "FID").isEmpty ? string(item, "id") : string(item, "FID")
+            let name = string(item, "name")
+            guard !id.isEmpty, !name.isEmpty else { return nil }
+            return JmFavoriteFolder(id: id, name: name)
+        }
+        return JmFavoritePage(
+            items: items,
+            folders: folders,
+            total: int(json, "total"),
+            pageSize: int(json, "count"),
+            page: page
+        )
     }
 
     // MARK: - 本子详情
