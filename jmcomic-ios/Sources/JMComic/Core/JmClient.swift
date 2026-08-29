@@ -5,6 +5,9 @@ enum JmError: LocalizedError {
     case badResponse(Int)
     case decryptFailed
     case parseFailed(String)
+    case invalidCredentials(String)
+    case sessionExpired
+    case api(String)
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +15,10 @@ enum JmError: LocalizedError {
         case .badResponse(let code): return "服务器返回 HTTP \(code)"
         case .decryptFailed: return "响应解密失败"
         case .parseFailed(let what): return "解析失败：\(what)"
+        case .invalidCredentials(let message):
+            return message.isEmpty ? "用户名或密码错误" : "登录失败：\(message)"
+        case .sessionExpired: return "JM 登录状态已失效，请重新登录"
+        case .api(let message): return message.isEmpty ? "JM 接口返回错误" : message
         }
     }
 }
@@ -43,7 +50,8 @@ actor JmClient {
          */
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        // Cookie 同理：本应用不需要会话态，留着只是多一处可追溯痕迹
+        // 不使用系统共享 Cookie 仓库。账号会话由 JmAccountStore 单独存钥匙串，
+        // 仅在收藏等认证请求中手工附加，匿名浏览不会留下会话痕迹。
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.httpMaximumConnectionsPerHost = 6
@@ -93,13 +101,32 @@ actor JmClient {
 
     // MARK: - 请求
 
-    /// 发一个签名 GET，返回解密后的 JSON 对象。逐个域名重试。
-    private func getJSON(path: String, query: [URLQueryItem] = [],
-                         secret: String = JmConstants.tokenSecret) async throws -> [String: Any] {
-        try await bootstrap()
+    private struct JSONResponse {
+        let json: [String: Any]
+        let cookies: [String: String]
+        let host: String
+    }
+
+    /// 发签名 GET / POST 并返回解密后的对象。Cookie 不进入系统共享仓库。
+    private func requestJSON(path: String,
+                             query: [URLQueryItem] = [],
+                             form: [URLQueryItem]? = nil,
+                             cookies: [String: String] = [:],
+                             preferredHost: String? = nil,
+                             authenticated: Bool = false,
+                             secret: String = JmConstants.tokenSecret) async throws -> JSONResponse {
+        await bootstrap()
         var lastError: Error = JmError.noDomain
 
-        for host in orderedDomains {
+        var hosts = orderedDomains
+        if let preferredHost, let index = hosts.firstIndex(of: preferredHost) {
+            hosts.remove(at: index)
+            hosts.insert(preferredHost, at: 0)
+        } else if let preferredHost, !preferredHost.isEmpty {
+            hosts.insert(preferredHost, at: 0)
+        }
+
+        for host in hosts {
             var comps = URLComponents()
             comps.scheme = "https"
             comps.host = host
@@ -112,22 +139,75 @@ actor JmClient {
             var req = URLRequest(url: url)
             req.setValue(t.token, forHTTPHeaderField: "token")
             req.setValue(t.param, forHTTPHeaderField: "tokenparam")
+            if let form {
+                req.httpMethod = "POST"
+                var body = URLComponents()
+                body.queryItems = form
+                let encoded = (body.percentEncodedQuery ?? "").replacingOccurrences(of: "%20", with: "+")
+                req.httpBody = Data(encoded.utf8)
+                req.setValue("application/x-www-form-urlencoded; charset=utf-8",
+                             forHTTPHeaderField: "Content-Type")
+            }
+            let safeCookies = cookies.filter { name, value in
+                !name.isEmpty && !name.contains(";") && !name.contains("\n")
+                    && !value.contains(";") && !value.contains("\n")
+            }
+            if !safeCookies.isEmpty {
+                let header = safeCookies.keys.sorted().compactMap { name in
+                    safeCookies[name].map { "\(name)=\($0)" }
+                }.joined(separator: "; ")
+                req.setValue(header, forHTTPHeaderField: "Cookie")
+            }
 
             do {
                 let (data, response) = try await session.data(for: req)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard let http = response as? HTTPURLResponse else {
+                    throw JmError.parseFailed("无法读取 HTTP 响应")
+                }
+                let code = http.statusCode
                 guard code == 200 else {
+                    if path == "login", code == 401 || code == 403 {
+                        throw JmError.invalidCredentials("")
+                    }
+                    if authenticated, code == 401 || code == 403 {
+                        lastError = JmError.sessionExpired
+                        continue
+                    }
                     failures[host, default: 0] += 1
                     _failuresVersion += 1
                     lastError = JmError.badResponse(code)
                     continue
                 }
-                guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let encoded = envelope["data"] as? String else {
+                guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     failures[host, default: 0] += 1
                     _failuresVersion += 1
                     lastError = JmError.parseFailed("响应结构异常")
                     continue
+                }
+                let apiCode: Int
+                if let value = envelope["code"] as? Int {
+                    apiCode = value
+                } else if let value = envelope["code"] as? String, let parsed = Int(value) {
+                    apiCode = parsed
+                } else {
+                    apiCode = 0
+                }
+                guard apiCode == 200, let encoded = envelope["data"] as? String else {
+                    let message = (envelope["errorMsg"] as? String)
+                        ?? (envelope["message"] as? String)
+                        ?? ""
+                    if path == "login" { throw JmError.invalidCredentials(message) }
+                    if authenticated {
+                        let normalized = message.lowercased()
+                        let indicatesExpiredSession = apiCode == 401 || apiCode == 403
+                            || normalized.contains("login") || normalized.contains("member")
+                            || message.contains("登录") || message.contains("登入")
+                        if indicatesExpiredSession {
+                            lastError = JmError.sessionExpired
+                            continue
+                        }
+                    }
+                    throw JmError.api(message)
                 }
                 guard let plain = JmCrypto.decrypt(base64: encoded, timestamp: ts,
                                                    secret: JmConstants.dataSecret),
@@ -137,9 +217,37 @@ actor JmClient {
                 }
                 failures[host] = 0
                 _failuresVersion += 1
-                if let dict = obj as? [String: Any] { return dict }
-                if let arr = obj as? [Any] { return ["list": arr] }
-                throw JmError.parseFailed("未知的 JSON 结构")
+                let json: [String: Any]
+                if let dict = obj as? [String: Any] {
+                    json = dict
+                } else if let arr = obj as? [Any] {
+                    json = ["list": arr]
+                } else {
+                    throw JmError.parseFailed("未知的 JSON 结构")
+                }
+
+                let headerFields = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+                    guard let key = pair.key as? String else { return }
+                    result[key] = String(describing: pair.value)
+                }
+                let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
+                let cookieMap = responseCookies.reduce(into: [String: String]()) { result, cookie in
+                    result[cookie.name] = cookie.value
+                }
+                return JSONResponse(json: json, cookies: cookieMap, host: host)
+            } catch let error as JmError {
+                switch error {
+                case .invalidCredentials, .api:
+                    throw error
+                case .sessionExpired:
+                    lastError = error
+                    continue
+                default:
+                    failures[host, default: 0] += 1
+                    _failuresVersion += 1
+                    lastError = error
+                    continue
+                }
             } catch {
                 failures[host, default: 0] += 1
                 _failuresVersion += 1
@@ -148,6 +256,12 @@ actor JmClient {
             }
         }
         throw lastError
+    }
+
+    /// 保留匿名业务接口的简洁调用形式。
+    private func getJSON(path: String, query: [URLQueryItem] = [],
+                         secret: String = JmConstants.tokenSecret) async throws -> [String: Any] {
+        try await requestJSON(path: path, query: query, secret: secret).json
     }
 
     /// 下载原始字节（图片、封面）。不签名、不解密。
@@ -165,6 +279,30 @@ actor JmClient {
     }
 
     // MARK: - 业务接口
+
+    func login(username: String, password: String) async throws -> JmLoginResult {
+        let response = try await requestJSON(path: "login", form: [
+            .init(name: "username", value: username),
+            .init(name: "password", value: password),
+        ])
+        let profile = try JmParser.parseAccount(response.json, fallbackUsername: username)
+        guard let avs = response.json["s"] as? String, !avs.isEmpty else {
+            throw JmError.invalidCredentials("登录响应缺少会话信息")
+        }
+        var cookies = response.cookies
+        cookies["AVS"] = avs
+        return JmLoginResult(profile: profile, cookies: cookies, preferredHost: response.host)
+    }
+
+    func favoritePage(page: Int, folderID: String,
+                      cookies: [String: String], preferredHost: String) async throws -> JmFavoritePage {
+        let response = try await requestJSON(path: "favorite", query: [
+            .init(name: "page", value: String(page)),
+            .init(name: "folder_id", value: folderID),
+            .init(name: "o", value: "mr"),
+        ], cookies: cookies, preferredHost: preferredHost, authenticated: true)
+        return JmParser.parseFavoritePage(response.json, page: page)
+    }
 
     func hot(page: Int) async throws -> PagedAlbums {
         let json = try await getJSON(path: "search", query: [
