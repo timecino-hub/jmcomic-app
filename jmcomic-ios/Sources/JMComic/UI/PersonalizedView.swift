@@ -10,6 +10,8 @@ import SwiftUI
 /// 数据全部本地计算，不上传。
 struct PersonalizedView: View {
 
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
+
     @StateObject private var library = LibraryStore.shared
     @State private var items: [AlbumMeta] = []
     @State private var profileTags: [String] = []
@@ -79,7 +81,7 @@ struct PersonalizedView: View {
 
     private var grid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+            LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 16) {
                 ForEach(items) { meta in
                     Button { path.append(.album(meta)) } label: {
                         AlbumCard(meta: meta)

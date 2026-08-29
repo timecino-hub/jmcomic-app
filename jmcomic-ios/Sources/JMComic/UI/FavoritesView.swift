@@ -7,6 +7,8 @@ import SwiftUI
 /// 分组的新建 / 改名 / 删除在分组选择行上操作。
 struct FavoritesView: View {
 
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
+
     @ObservedObject private var favorites = FavoriteStore.shared
     @State private var folder = "默认"
     /// 绑定自 App 的收藏栈 NavigationStack
@@ -156,7 +158,7 @@ struct FavoritesView: View {
                 .font(.footnote)
                 .padding(60)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+                LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 16) {
                     ForEach(shown) { entry in
                         Button { path.append(.album(entry.meta)) } label: {
                             AlbumCard(meta: entry.meta)

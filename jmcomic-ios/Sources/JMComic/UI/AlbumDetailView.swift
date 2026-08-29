@@ -10,6 +10,7 @@ import UIKit
 struct AlbumDetailView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.jmUsesLargePadLayout) private var usesLargePadLayout
     let meta: AlbumMeta
     @Binding var path: [Route]
 
@@ -122,10 +123,13 @@ struct AlbumDetailView: View {
 
     private func header(_ album: Album) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            CoverImage(albumId: album.id, width: horizontalSizeClass == .regular ? 140 : 110)
+            CoverImage(albumId: album.id,
+                       width: usesLargePadLayout ? 180 : (horizontalSizeClass == .regular ? 140 : 110))
 
             VStack(alignment: .leading, spacing: 7) {
-                Text(album.title).font(.title3.weight(.semibold)).lineLimit(3)
+                Text(album.title)
+                    .font((usesLargePadLayout ? Font.title2 : Font.title3).weight(.semibold))
+                    .lineLimit(3)
                 Text(album.authorText).font(.footnote).foregroundStyle(.secondary)
 
                 // 专辑 ID：可选中 / 一键复制（方便搜索、分享）

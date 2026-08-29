@@ -312,7 +312,7 @@ struct LocalReaderView: View {
         GeometryReader { geo in
             let pageWidth = singlePage
                 ? geo.size.width
-                : min(geo.size.width, JMLayout.readerContinuousMaxWidth)
+                : JMLayout.readerContinuousWidth(for: geo.size)
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {

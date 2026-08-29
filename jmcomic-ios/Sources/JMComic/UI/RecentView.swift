@@ -4,6 +4,8 @@ import SwiftUI
 /// 进程被杀/重启也不丢。工具栏提供「清空」并带确认。
 struct RecentView: View {
 
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
+
     @ObservedObject private var library = LibraryStore.shared
     /// 与浏览栈根共享同一 path（Route 目标页由 BrowseView 统一注册）
     @Binding var path: [Route]
@@ -25,7 +27,7 @@ struct RecentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+                    LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 16) {
                         ForEach(library.recentlyViewed) { meta in
                             Button { path.append(.album(meta)) } label: {
                                 AlbumCard(meta: meta)

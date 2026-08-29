@@ -22,7 +22,7 @@ private enum AppSection: String, CaseIterable, Identifiable {
 /// iOS / iPadOS 通用入口。
 ///
 /// - iPhone 与 iPad 分屏窄窗口：底部 TabView。
-/// - 11 英寸 iPad 竖屏：默认收起侧边栏，让漫画网格使用完整宽度。
+/// - 11 / 13 英寸 iPad 竖屏：默认收起侧边栏，让漫画网格使用完整宽度。
 /// - iPad 横屏：NavigationSplitView 侧边栏常驻。
 /// - 每个窗口都持有独立的选择和导航路径，支持 iPadOS 多窗口与台前调度。
 @main
@@ -53,6 +53,10 @@ private struct JMComicRootView: View {
         GeometryReader { geometry in
             let prefersHiddenSidebar = geometry.size.height >= geometry.size.width
                 || geometry.size.width < 900
+            let resolvedAlbumGridColumnCount = albumGridColumnCount(
+                prefersHiddenSidebar: prefersHiddenSidebar)
+            let usesLargePadLayout = horizontalSizeClass == .regular
+                && min(geometry.size.width, geometry.size.height) >= 960
 
             Group {
                 if horizontalSizeClass == .regular {
@@ -62,6 +66,8 @@ private struct JMComicRootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .environment(\.jmAlbumGridColumnCount, resolvedAlbumGridColumnCount)
+            .environment(\.jmUsesLargePadLayout, usesLargePadLayout)
             .onAppear {
                 syncSplitVisibility(prefersHiddenSidebar: prefersHiddenSidebar)
             }
@@ -127,6 +133,16 @@ private struct JMComicRootView: View {
         guard lastPrefersHiddenSidebar != prefersHiddenSidebar else { return }
         lastPrefersHiddenSidebar = prefersHiddenSidebar
         splitVisibility = prefersHiddenSidebar ? .detailOnly : .all
+    }
+
+    /// 11 与 13 英寸保持一致的信息密度：默认竖屏 4 列、横屏 5 列。
+    /// 若用户在窄竖屏手动展开侧边栏，则退回自适应列数，避免四列被挤得过窄。
+    private func albumGridColumnCount(prefersHiddenSidebar: Bool) -> Int? {
+        guard horizontalSizeClass == .regular else { return nil }
+        if prefersHiddenSidebar,
+           lastPrefersHiddenSidebar != nil,
+           splitVisibility != .detailOnly { return nil }
+        return prefersHiddenSidebar ? 4 : 5
     }
 
     /// List 的单选绑定是可选值；拒绝 nil，保证内容区始终有一个可见功能区。

@@ -10,6 +10,8 @@ import UniformTypeIdentifiers
 /// 阅读进度与在线阅读共用同一份历史（LibraryStore）。
 struct LocalLibraryView: View {
 
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
+
     @ObservedObject private var downloads = DownloadStore.shared
     @State private var path: [DownloadedAlbum] = []
     @State private var showImporter = false
@@ -91,7 +93,7 @@ struct LocalLibraryView: View {
                         importNotice = nil
                     }
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 18) {
+            LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 18) {
                 ForEach(downloads.library) { album in
                     NavigationLink(value: album) {
                         AlbumCard(meta: album.meta,
@@ -119,6 +121,7 @@ struct LocalLibraryView: View {
 struct LocalAlbumDetailView: View {
 
     let album: DownloadedAlbum
+    @Environment(\.jmUsesLargePadLayout) private var usesLargePadLayout
     @State private var reading: DownloadedChapter?
     @StateObject private var library = LibraryStore.shared
 
@@ -128,7 +131,7 @@ struct LocalAlbumDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top, spacing: 14) {
-                    CoverImage(albumId: album.meta.id, width: 110)
+                    CoverImage(albumId: album.meta.id, width: usesLargePadLayout ? 180 : 110)
 
                     VStack(alignment: .leading, spacing: 9) {
                         Text(album.meta.title).font(.title3.weight(.semibold)).lineLimit(3)

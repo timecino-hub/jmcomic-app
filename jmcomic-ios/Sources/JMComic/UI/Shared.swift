@@ -2,16 +2,53 @@ import SwiftUI
 import UIKit
 import CoreGraphics
 
-/// iPhone / iPad 共用的响应式宽度上限。
+/// 根视图按当前窗口形态给 iPad 指定稳定列数；iPhone / 紧凑窗口保留自适应列数。
+private struct JMAlbumGridColumnCountKey: EnvironmentKey {
+    static let defaultValue: Int? = nil
+}
+
+private struct JMLargePadLayoutKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var jmAlbumGridColumnCount: Int? {
+        get { self[JMAlbumGridColumnCountKey.self] }
+        set { self[JMAlbumGridColumnCountKey.self] = newValue }
+    }
+
+    var jmUsesLargePadLayout: Bool {
+        get { self[JMLargePadLayoutKey.self] }
+        set { self[JMLargePadLayoutKey.self] = newValue }
+    }
+}
+
+/// iPhone / 11 英寸 / 13 英寸 iPad 共用的响应式尺寸策略。
 ///
-/// 11 英寸 iPad 横屏的内容区很宽；对网格保留利用率，对长文本、详情和阅读器适度限宽，
-/// 避免控件被拉成一整条，同时不依赖某一代 iPad 的固定像素尺寸。
+/// 11 与 13 英寸保持相同信息密度：默认竖屏 4 列 / 横屏 5 列，13 英寸用额外空间
+/// 放大封面而不是增加列数。阅读器按窗口短边选择宽度档位，同时覆盖分屏和台前调度窗口。
 enum JMLayout {
     static let contentMaxWidth: CGFloat = 1120
     static let detailMaxWidth: CGFloat = 980
-    static let readerContinuousMaxWidth: CGFloat = 900
     static let readerToolbarMaxWidth: CGFloat = 980
     static let readerJumpBarMaxWidth: CGFloat = 760
+
+    static let albumGridMinimumWidth: CGFloat = 160
+    static let albumGridSpacing: CGFloat = 14
+    static func albumGridColumns(count: Int?) -> [GridItem] {
+        if let count {
+            return Array(repeating: GridItem(.flexible(), spacing: albumGridSpacing), count: count)
+        }
+        return [GridItem(.adaptive(minimum: albumGridMinimumWidth), spacing: albumGridSpacing)]
+    }
+
+    /// 13 英寸 iPad 的全屏短边约为 1024 pt；安全区变化后仍明显大于 11 英寸的约 820–834 pt。
+    /// 窗口短边达到 960 pt 时启用 1024 pt 上限，否则维持 11 英寸验证过的 900 pt 上限。
+    static func readerContinuousWidth(for viewport: CGSize) -> CGFloat {
+        let shortSide = min(viewport.width, viewport.height)
+        let widthCap: CGFloat = shortSide >= 960 ? 1024 : 900
+        return min(viewport.width, widthCap)
+    }
 }
 
 extension View {
@@ -93,10 +130,11 @@ struct AlbumCard: View {
     /// 底部附加信息行（本地库显示「N 话 · N 页」用）
     var footer: String? = nil
 
+    @Environment(\.jmUsesLargePadLayout) private var usesLargePadLayout
     @State private var image: CGImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: usesLargePadLayout ? 8 : 6) {
             ZStack {
                 if let image {
                     Image(decorative: image, scale: 1.0)
@@ -109,21 +147,21 @@ struct AlbumCard: View {
             // 宽度撑满列、比例固定 3:4：两列网格随屏宽自适应
             .aspectRatio(3 / 4, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: usesLargePadLayout ? 10 : 8))
 
             Text(meta.title)
-                .font(.footnote)
+                .font(usesLargePadLayout ? .callout : .footnote)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let footer {
                 Text(footer)
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(usesLargePadLayout ? .footnote : .caption2).foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(meta.authorText)
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(usesLargePadLayout ? .footnote : .caption2).foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

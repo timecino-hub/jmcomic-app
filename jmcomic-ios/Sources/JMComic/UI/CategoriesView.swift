@@ -9,6 +9,8 @@ import SwiftUI
 /// - 混选分类：各分类拉取 + 标签搜索，并集去重
 struct CategoriesView: View {
 
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
+
     /// 标签项：分类 slug 走官方筛选，关键词走搜索
     private enum SideItem: Hashable {
         case category(slug: String, name: String)
@@ -71,7 +73,7 @@ struct CategoriesView: View {
                     .frame(maxWidth: .infinity)
                     .padding(40)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+                    LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 16) {
                         ForEach(items) { meta in
                             Button { path.append(.album(meta)) } label: {
                                 AlbumCard(meta: meta)

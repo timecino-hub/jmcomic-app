@@ -11,6 +11,7 @@ import UIKit
 struct BrowseView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.jmAlbumGridColumnCount) private var albumGridColumnCount
 
     private enum Feed: String, CaseIterable, Identifiable {
         case hot = "热门"
@@ -258,7 +259,7 @@ struct BrowseView: View {
     @ViewBuilder
     private var gridContent: some View {
         let shown = shownItems
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+        LazyVGrid(columns: JMLayout.albumGridColumns(count: albumGridColumnCount), spacing: 16) {
             ForEach(shown) { meta in
                 Button { path.append(.album(meta)) } label: {
                     AlbumCard(meta: meta)
