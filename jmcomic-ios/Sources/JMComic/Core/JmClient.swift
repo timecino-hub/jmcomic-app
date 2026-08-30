@@ -190,22 +190,23 @@ actor JmClient {
                 } else if let value = envelope["code"] as? String, let parsed = Int(value) {
                     apiCode = parsed
                 } else {
-                    apiCode = 0
+                    // 缺失或非数字 code 表示当前镜像响应损坏，不是业务错误。
+                    // 记录为主机级故障并尝试下一个域名，避免一个异常镜像阻断全部请求。
+                    failures[host, default: 0] += 1
+                    _failuresVersion += 1
+                    lastError = JmError.parseFailed("响应缺少有效 code 字段")
+                    continue
                 }
                 guard apiCode == 200, let encoded = envelope["data"] as? String else {
                     let message = (envelope["errorMsg"] as? String)
                         ?? (envelope["message"] as? String)
                         ?? ""
                     if path == "login" { throw JmError.invalidCredentials(message) }
-                    if authenticated {
-                        let normalized = message.lowercased()
-                        let indicatesExpiredSession = apiCode == 401 || apiCode == 403
-                            || normalized.contains("login") || normalized.contains("member")
-                            || message.contains("登录") || message.contains("登入")
-                        if indicatesExpiredSession {
-                            lastError = JmError.sessionExpired
-                            continue
-                        }
+                    // 只有服务端明确返回认证状态码时才删除本机会话。
+                    // 普通业务错误即使提到 login/member，也不能据此判定 Cookie 失效。
+                    if authenticated, apiCode == 401 || apiCode == 403 {
+                        lastError = JmError.sessionExpired
+                        continue
                     }
                     throw JmError.api(message)
                 }
