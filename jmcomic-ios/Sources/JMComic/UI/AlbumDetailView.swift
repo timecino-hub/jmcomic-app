@@ -28,6 +28,7 @@ struct AlbumDetailView: View {
     @State private var showPreviewViewer = false
     @State private var previewIndex = 0
     @State private var previewFailed = false
+    @State private var filterNotice: String?
 
     init(meta: AlbumMeta, path: Binding<[Route]>) {
         self.meta = meta
@@ -74,6 +75,14 @@ struct AlbumDetailView: View {
         } message: {
             Text("散图为 PNG 无损，适合二次处理；CBZ 为 JPEG 归档更省空间。")
         }
+        .alert("内容过滤", isPresented: Binding(
+            get: { filterNotice != nil },
+            set: { if !$0 { filterNotice = nil } }
+        )) {
+            Button("好", role: .cancel) { filterNotice = nil }
+        } message: {
+            Text(filterNotice ?? "")
+        }
     }
 
     private func startDownload(_ format: DownloadFormat) {
@@ -106,7 +115,24 @@ struct AlbumDetailView: View {
             }
 
             if !album.tags.isEmpty {
-                FlowTags(tags: album.tags)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("标签").font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("点击检索 · 长按过滤")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    FlowTags(
+                        tags: album.tags,
+                        onTap: { path.append(.tag($0)) },
+                        onExclude: { tag in
+                            filterNotice = AppPrefs.addExcludedTag(tag)
+                                ? "已将“\(tag)”加入不感兴趣标签。"
+                                : "“\(tag)”已经在不感兴趣标签中。"
+                        }
+                    )
+                }
             }
 
             chaptersSection(album)
@@ -124,7 +150,28 @@ struct AlbumDetailView: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(album.title).font(.title3.weight(.semibold)).lineLimit(3)
-                Text(album.authorText).font(.footnote).foregroundStyle(.secondary)
+                if album.authors.isEmpty {
+                    Text("未知作者").font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(album.authors, id: \.self) { author in
+                                Button {
+                                    path.append(.author(author))
+                                } label: {
+                                    Label(author, systemImage: "person")
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 4)
+                                        .background(Color.primary.opacity(0.07), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("检索作者 \(author)")
+                            }
+                        }
+                    }
+                }
 
                 // 专辑 ID：可选中 / 一键复制（方便搜索、分享）
                 HStack(spacing: 6) {

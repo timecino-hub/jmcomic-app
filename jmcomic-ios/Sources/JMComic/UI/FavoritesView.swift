@@ -38,6 +38,10 @@ struct FavoritesView: View {
             switch route {
             case .album(let meta):
                 AlbumDetailView(meta: meta, path: $path)
+            case .tag(let tag):
+                TagResultsView(tag: tag, path: $path)
+            case .author(let author):
+                AuthorResultsView(author: author, path: $path)
             case .categories, .personalized, .recent:
                 EmptyView()   // 本页只会推入详情页，这三个 case 仅在浏览 tab 顶层出现
             }

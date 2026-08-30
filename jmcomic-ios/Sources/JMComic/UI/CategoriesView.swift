@@ -1,57 +1,82 @@
 import SwiftUI
 
-/// 分类/标签浏览页（iOS 版）。
+/// 分类与标签浏览：一个官方分类 + 任意多个精确标签，所有已选条件同时满足。
 ///
-/// Mac 版是左右两栏（固定分类栏 + 内容栏）；iPhone 竖屏放不下双栏：
-/// 改为「标签选择卡（可折叠，多选）+ 应用筛选按钮 + 结果网格」。
-/// 多选精准语义与 Mac 版一致：
-/// - 纯标签：逐个标签单独搜索取 **id 交集**（都包含）
-/// - 混选分类：各分类拉取 + 标签搜索，并集去重
+/// 移动端 API 不支持在标签搜索中直接附带分类，因此混合筛选以分类页为候选源，
+/// 再分批读取详情验证标签；纯多标签则以第一个标签为候选源，再验证其余标签。
 struct CategoriesView: View {
+    private struct CategoryOption: Hashable, Identifiable {
+        let slug: String
+        let name: String
+        var id: String { slug }
+    }
 
-    /// 标签项：分类 slug 走官方筛选，关键词走搜索
-    private enum SideItem: Hashable {
-        case category(slug: String, name: String)
-        case keyword(String)
-        var name: String {
-            switch self {
-            case .category(_, let name): return name
-            case .keyword(let k): return k
-            }
+    private struct AppliedQuery: Equatable {
+        let category: CategoryOption?
+        let tags: [String]
+        let order: JmDiscoveryOrder
+        let period: JmDiscoveryPeriod
+
+        var sourceTag: String? { category == nil ? tags.first : nil }
+        var title: String {
+            ([category?.name].compactMap { $0 } + tags).joined(separator: " + ")
         }
     }
 
-    private static let categories: [(String, String)] = [
-        ("doujin", "同人"), ("single", "单本"), ("short", "短篇"),
-        ("hanman", "韩漫"), ("meiman", "美漫"),
-        ("doujin_cosplay", "cosplay"), ("3D", "3D"), ("another", "其他"),
+    private static let categories = [
+        CategoryOption(slug: "doujin", name: "同人"),
+        CategoryOption(slug: "single", name: "单本"),
+        CategoryOption(slug: "short", name: "短篇"),
+        CategoryOption(slug: "hanman", name: "韩漫"),
+        CategoryOption(slug: "meiman", name: "美漫"),
+        CategoryOption(slug: "doujin_cosplay", name: "cosplay"),
+        CategoryOption(slug: "3D", name: "3D"),
+        CategoryOption(slug: "another", name: "其他"),
     ]
-    private static let subCategories: [(String, String)] = [
-        ("chinese", "中文"), ("japanese", "日语"), ("CG", "CG"),
-        ("youth", "青年漫"), ("other", "其他"),
+    private static let subCategories = [
+        CategoryOption(slug: "chinese", name: "中文"),
+        CategoryOption(slug: "japanese", name: "日语"),
+        CategoryOption(slug: "CG", name: "CG"),
+        CategoryOption(slug: "youth", name: "青年漫"),
+        CategoryOption(slug: "other", name: "其他"),
     ]
-    /// 常用分类词（服务端没有全量标签接口，用搜索覆盖常用标签）
-    private static let keywords: [String] = [
+    private static let commonTags = [
         "純愛", "NTR", "百合", "偽娘", "獸人", "觸手",
         "科幻", "奇幻", "校園", "辦公室", "兄妹", "老師",
         "偶像", "足控", "癡女", "人妻", "女僕", "亂倫",
         "中出", "全彩", "AI繪圖",
     ]
 
-    @State private var selected: Set<SideItem> = []
-    @State private var items: [AlbumMeta] = []
-    @State private var hasSearched = false
-    @State private var loading = false
-    @State private var error: String?
-    @State private var hotTags: [String] = []
-    /// 与浏览栈根共享同一 path（Route 目标页由 BrowseView 统一注册）
     @Binding var path: [Route]
     @StateObject private var library = LibraryStore.shared
-    /// 请求序号：防快速切换时旧请求覆盖新结果（竞态）
-    @State private var loadSeq = 0
+
+    @State private var selectedCategory: CategoryOption?
+    @State private var selectedTags = Set<String>()
+    @State private var customTag = ""
+    @State private var authorQuery = ""
+    @State private var hotTags: [String] = []
+    @State private var order: JmDiscoveryOrder = .latest
+    @State private var period: JmDiscoveryPeriod = .all
+
+    @State private var appliedQuery: AppliedQuery?
+    @State private var items: [AlbumMeta] = []
+    @State private var page = 0
+    @State private var totalPages = 1
+    @State private var loading = false
+    @State private var error: String?
+    @State private var requestID = 0
 
     init(path: Binding<[Route]>) {
         _path = path
+    }
+
+    private var hasSelection: Bool { selectedCategory != nil || !selectedTags.isEmpty }
+    private var canLoadMore: Bool { appliedQuery != nil && page > 0 && page < totalPages }
+    private var customSelectedTags: [String] {
+        let known = Self.commonTags + hotTags
+        return selectedTags
+            .filter { tag in !known.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) }
+            .sorted()
     }
 
     var body: some View {
@@ -59,79 +84,96 @@ struct CategoriesView: View {
             VStack(alignment: .leading, spacing: 14) {
                 selectorCard
                 resultHeader
-                if loading {
-                    ProgressView("正在按条件筛选…")
-                        .frame(maxWidth: .infinity)
-                        .padding(40)
-                } else if items.isEmpty && hasSearched {
-                    VStack(spacing: 8) {
-                        Image(systemName: "square.grid.2x2").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("没有符合条件的作品").foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(40)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
-                        ForEach(items) { meta in
-                            Button { path.append(.album(meta)) } label: {
-                                AlbumCard(meta: meta)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
+                resultContent
+                bottomSection
             }
             .padding(.top, 8)
-            .padding(.bottom, 24)
+            .padding(.bottom, 28)
         }
-        .navigationTitle("分类")
+        .navigationTitle("分类与标签")
         .navigationBarTitleDisplayMode(.inline)
-        // Route 目标页已在浏览栈根（BrowseView）统一注册，这里不再重复声明
-        .task { await loadTags() }
+        .task { await loadHotTags() }
     }
 
-    // MARK: - 选择卡
+    // MARK: - 筛选卡
 
-    @ViewBuilder
     private var selectorCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(selected.isEmpty ? "选择分类 / 标签" : "已选 \(selected.count) 项")
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Label("组合筛选", systemImage: "line.3.horizontal.decrease.circle")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                if !selected.isEmpty {
-                    Button("清除") {
-                        selected.removeAll()
-                        items = []
-                        hasSearched = false
-                        error = nil
-                    }
+                if hasSelection {
+                    Button("清除", action: clearSelectionAndResults)
                     .font(.caption)
                 }
             }
 
-            if selected.isEmpty {
-                Text("可多选：多个标签 = 组合搜索（取交集）；混选分类 = 并集。选好后点「应用筛选」。")
-                    .font(.caption2).foregroundStyle(.secondary)
+            Text("可选一个分类和多个标签；所有条件必须同时满足。标签使用精确字段检索。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("输入作者名", text: $authorQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .onSubmit { openAuthor() }
+                Button("查作者", action: openAuthor)
+                    .buttonStyle(.bordered)
+                    .disabled(authorQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            chipSection("官方分类", Self.categories.map { SideItem.category(slug: $0.0, name: $0.1) })
-            chipSection("子分类", Self.subCategories.map { SideItem.category(slug: $0.0, name: $0.1) })
-            chipSection("常用", Self.keywords.map { SideItem.keyword($0) })
-            if !hotTags.isEmpty {
-                chipSection("热门标签", hotTags.map { SideItem.keyword($0) })
+            HStack(spacing: 8) {
+                TextField("输入任意标签", text: $customTag)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.done)
+                    .onSubmit { addCustomTag() }
+                Button("添加", action: addCustomTag)
+                    .buttonStyle(.bordered)
+                    .disabled(customTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            categorySection("官方分类", Self.categories)
+            categorySection("子分类", Self.subCategories)
+            tagSection("常用标签", Self.commonTags)
+            if !hotTags.isEmpty { tagSection("热门标签", hotTags) }
+            if !customSelectedTags.isEmpty { tagSection("自定义标签", customSelectedTags) }
+
+            HStack(spacing: 10) {
+                Picker("排序", selection: $order) {
+                    ForEach(JmDiscoveryOrder.allCases) { value in
+                        Text(value.title).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Menu {
+                    Picker("时间范围", selection: $period) {
+                        ForEach(JmDiscoveryPeriod.allCases) { value in
+                            Text(value.title).tag(value)
+                        }
+                    }
+                } label: {
+                    Label(period.title, systemImage: "calendar")
+                        .font(.caption)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(Color.primary.opacity(0.07), in: Capsule())
+                }
             }
 
             Button {
-                Task { await load(selected) }
+                Task { await applySelection() }
             } label: {
-                Label(loading ? "筛选中…" : (hasSearched ? "重新应用筛选" : "应用筛选"),
-                      systemImage: "line.3.horizontal.decrease.circle")
+                Label(loading ? "筛选中…" : "应用筛选", systemImage: "checkmark.circle")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selected.isEmpty || loading)
+            .disabled(!hasSelection || loading)
         }
         .padding(12)
         .background(Color.primary.opacity(0.04))
@@ -139,138 +181,254 @@ struct CategoriesView: View {
         .padding(.horizontal, 16)
     }
 
-    private func chipSection(_ title: String, _ allItems: [SideItem]) -> some View {
+    private func categorySection(_ title: String, _ options: [CategoryOption]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            chips(allItems)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6, alignment: .leading)],
+                      alignment: .leading, spacing: 6) {
+                ForEach(options) { option in
+                    let selected = selectedCategory == option
+                    Button {
+                        selectedCategory = selected ? nil : option
+                    } label: {
+                        chipLabel(option.name, selected: selected, radio: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
-    /// 芯片多选行：点击切换选中态
-    private func chips(_ allItems: [SideItem]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6, alignment: .leading)],
-                  alignment: .leading, spacing: 6) {
-            ForEach(allItems, id: \.self) { item in
-                let isOn = selected.contains(item)
-                Button {
-                    if isOn { selected.remove(item) } else { selected.insert(item) }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: isOn ? "checkmark" : "")
-                            .font(.caption2.weight(.bold))
-                        Text(item.name).font(.caption).lineLimit(1)
+    private func tagSection(_ title: String, _ tags: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6, alignment: .leading)],
+                      alignment: .leading, spacing: 6) {
+                ForEach(uniqueTags(tags), id: \.self) { tag in
+                    let selected = containsTag(tag)
+                    Button { toggleTag(tag) } label: {
+                        chipLabel(tag, selected: selected, radio: false)
                     }
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(isOn ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.08))
-                    .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
+    }
+
+    private func chipLabel(_ text: String, selected: Bool, radio: Bool) -> some View {
+        HStack(spacing: 3) {
+            if selected {
+                Image(systemName: radio ? "circle.inset.filled" : "checkmark")
+                    .font(.caption2.weight(.bold))
+            }
+            Text(text).font(.caption).lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(selected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.08))
+        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+        .clipShape(Capsule())
     }
 
     // MARK: - 结果
 
-    private var selectedNames: String {
-        selected.map(\.name).sorted().joined(separator: " + ")
+    @ViewBuilder
+    private var resultHeader: some View {
+        if let query = appliedQuery {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(query.title).font(.headline).lineLimit(2)
+                Text("\(query.order.title) · \(query.period.title) · 已扫描第 \(page) / \(totalPages) 页")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     @ViewBuilder
-    private var resultHeader: some View {
-        if !items.isEmpty && hasSearched {
-            Text(selectedNames)
-                .font(.headline)
-                .lineLimit(1)
-                .padding(.horizontal, 16)
-        } else if let error {
-            VStack(spacing: 6) {
-                Image(systemName: "wifi.exclamationmark").font(.largeTitle)
-                Text(error).font(.footnote).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+    private var resultContent: some View {
+        if loading && items.isEmpty {
+            ProgressView("正在精确筛选…")
+                .frame(maxWidth: .infinity)
+                .padding(45)
+        } else if let error, items.isEmpty {
+            errorView(error)
+        } else if appliedQuery != nil && items.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "tag.slash").font(.largeTitle).foregroundStyle(.secondary)
+                Text(canLoadMore ? "当前页没有匹配结果，可以继续加载" : "没有符合全部条件的漫画")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(30)
+            .padding(40)
+        } else if !items.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 16) {
+                ForEach(items) { meta in
+                    Button { path.append(.album(meta)) } label: {
+                        AlbumCard(meta: meta)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
         }
+    }
+
+    @ViewBuilder
+    private var bottomSection: some View {
+        if appliedQuery != nil {
+            VStack(spacing: 10) {
+                if loading && !items.isEmpty {
+                    ProgressView()
+                } else if canLoadMore {
+                    Button("加载更多（\(page) / \(totalPages)）") {
+                        Task { await load(reset: false) }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if let error, !items.isEmpty {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                    Button("重试") { Task { await load(reset: false) } }
+                        .font(.caption)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func errorView(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark").font(.largeTitle)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("重试") { Task { await load(reset: true) } }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(40)
+    }
+
+    // MARK: - 标签选择
+
+    private func uniqueTags(_ tags: [String]) -> [String] {
+        var seen = Set<String>()
+        return tags.filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private func containsTag(_ tag: String) -> Bool {
+        selectedTags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
+    }
+
+    private func toggleTag(_ tag: String) {
+        if let existing = selectedTags.first(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+            selectedTags.remove(existing)
+        } else {
+            selectedTags.insert(tag)
+        }
+    }
+
+    private func addCustomTag() {
+        let tag = customTag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tag.isEmpty else { return }
+        if !containsTag(tag) { selectedTags.insert(tag) }
+        customTag = ""
+    }
+
+    private func openAuthor() {
+        let author = authorQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !author.isEmpty else { return }
+        authorQuery = ""
+        path.append(.author(author))
+    }
+
+    private func clearSelectionAndResults() {
+        requestID += 1
+        selectedCategory = nil
+        selectedTags.removeAll()
+        appliedQuery = nil
+        items = []
+        page = 0
+        totalPages = 1
+        loading = false
+        error = nil
     }
 
     // MARK: - 加载
 
-    private func loadTags() async {
+    private func loadHotTags() async {
         if let tags = try? await JmClient.shared.hotTags() {
-            hotTags = Array(tags.prefix(30))
+            hotTags = Array(uniqueTags(tags).prefix(30))
         }
     }
 
-    /// 多选加载（seq 序号过期则丢弃结果，防竞态覆盖）
-    private func load(_ sel: Set<SideItem>) async {
-        guard !sel.isEmpty else { return }
-        loadSeq += 1
-        let seq = loadSeq
+    private func applySelection() async {
+        let tags = selectedTags.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        guard selectedCategory != nil || !tags.isEmpty else { return }
+        appliedQuery = AppliedQuery(category: selectedCategory, tags: tags, order: order, period: period)
+        await load(reset: true)
+    }
+
+    private func load(reset: Bool) async {
+        guard let query = appliedQuery else { return }
+        if !reset && loading { return }
+        if reset {
+            requestID += 1
+            items = []
+            page = 0
+            totalPages = 1
+            error = nil
+        }
+        let currentRequest = requestID
+        let targetPage = reset ? 1 : page + 1
         loading = true
-        error = nil
-        defer { if seq == loadSeq { loading = false } }
-        let keywords = sel.compactMap { item -> String? in
-            if case .keyword(let k) = item { return k }
-            return nil
+        defer {
+            if currentRequest == requestID { loading = false }
         }
-        let cats = sel.compactMap { item -> String? in
-            if case .category(let s, _) = item { return s }
-            return nil
-        }
+
         do {
-            let raw: [AlbumMeta]
-            if cats.isEmpty {
-                if keywords.count <= 1 {
-                    let r = try await JmClient.shared.search(keywords.first ?? "", page: 1)
-                    raw = r.items
-                } else {
-                    // 多标签：并发搜索，取 id 交集 = 全部标签都包含的作品
-                    var results: [[AlbumMeta]] = []
-                    await withTaskGroup(of: [AlbumMeta].self) { group in
-                        for k in keywords {
-                            group.addTask {
-                                (try? await JmClient.shared.search(k, page: 1))?.items ?? []
-                            }
-                        }
-                        for await r in group { results.append(r) }
-                    }
-                    guard seq == loadSeq else { return }
-                    guard let first = results.first else {
-                        raw = []
-                        items = []
-                        hasSearched = true
-                        return
-                    }
-                    var common = Set(first.map(\.id))
-                    for r in results.dropFirst() {
-                        common.formIntersection(Set(r.map(\.id)))
-                    }
-                    raw = first.filter { common.contains($0.id) }
-                }
+            let result: PagedAlbums
+            if let category = query.category {
+                result = try await JmClient.shared.categories(
+                    category.slug,
+                    order: query.order.rawValue,
+                    time: query.period.rawValue,
+                    page: targetPage
+                )
+            } else if let sourceTag = query.sourceTag {
+                result = try await JmClient.shared.searchTag(
+                    sourceTag,
+                    order: query.order.rawValue,
+                    time: query.period.rawValue,
+                    page: targetPage
+                )
             } else {
-                // 含分类：各分类并集 + 标签并集
-                var map: [String: AlbumMeta] = [:]
-                for slug in cats {
-                    if let r = try? await JmClient.shared.categories(slug, page: 1) {
-                        for m in r.items { map[m.id] = m }
-                    }
-                    if seq != loadSeq { return }
-                }
-                if !keywords.isEmpty,
-                   let r = try? await JmClient.shared.search(keywords.joined(separator: " "), page: 1) {
-                    for m in r.items { map[m.id] = m }
-                }
-                raw = Array(map.values)
+                return
             }
-            guard seq == loadSeq else { return }
-            items = await library.filterByExclusions(raw)
-            hasSearched = true
+            guard currentRequest == requestID, !Task.isCancelled else { return }
+
+            var filtered = result.items
+            if query.category != nil || query.tags.count > 1 {
+                filtered = await library.filterByRequiredTags(filtered, requiredTags: query.tags)
+            }
+            filtered = await library.filterByExclusions(filtered)
+            guard currentRequest == requestID, !Task.isCancelled else { return }
+
+            if reset {
+                items = filtered
+            } else {
+                var known = Set(items.map(\.id))
+                items.append(contentsOf: filtered.filter { known.insert($0.id).inserted })
+            }
+            page = result.page
+            totalPages = max(result.totalPages, 1)
+            error = nil
+        } catch is CancellationError {
+            return
         } catch {
-            if seq == loadSeq {
-                self.error = error.localizedDescription
-                hasSearched = true
-            }
+            guard currentRequest == requestID else { return }
+            self.error = error.localizedDescription
         }
     }
 }

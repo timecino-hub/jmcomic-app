@@ -199,6 +199,10 @@ struct BrowseView: View {
                 AlbumDetailView(meta: meta, path: $path)
             case .categories:
                 CategoriesView(path: $path)
+            case .tag(let tag):
+                TagResultsView(tag: tag, path: $path)
+            case .author(let author):
+                AuthorResultsView(author: author, path: $path)
             case .personalized:
                 PersonalizedView(path: $path)
             case .recent:
@@ -212,7 +216,7 @@ struct BrowseView: View {
 
     private var entryRow: some View {
         HStack(spacing: 10) {
-            entryButton("分类", "square.grid.2x2") { path.append(.categories) }
+            entryButton("分类/标签", "square.grid.2x2") { path.append(.categories) }
             entryButton("为你推荐", "sparkles") { path.append(.personalized) }
             entryButton("最近浏览", "clock", badge: library.recentlyViewed.count) {
                 path.append(.recent)

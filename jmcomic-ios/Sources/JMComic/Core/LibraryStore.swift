@@ -282,6 +282,53 @@ final class LibraryStore: ObservableObject {
         return keep
     }
 
+    /// 精确保留同时含有全部 requiredTags 的作品。
+    ///
+    /// 列表接口只返回摘要，因此混合「分类 + 标签」或多标签筛选时需要读取详情。
+    /// 已缓存详情直接使用；其余按 8 个一批并发，避免瞬间打满服务端连接。
+    func filterByRequiredTags(_ metas: [AlbumMeta], requiredTags: [String]) async -> [AlbumMeta] {
+        let required = Set(requiredTags
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty })
+        guard !required.isEmpty, !metas.isEmpty else { return metas }
+
+        var matchedIDs = Set<String>()
+        var needFetch: [AlbumMeta] = []
+        for meta in metas {
+            if let cached = album(meta.id), !cached.tags.isEmpty {
+                let actual = Set(cached.tags.map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                })
+                if required.isSubset(of: actual) { matchedIDs.insert(meta.id) }
+            } else {
+                needFetch.append(meta)
+            }
+        }
+
+        for batch in stride(from: 0, to: needFetch.count, by: 8) {
+            let slice = Array(needFetch[batch..<min(batch + 8, needFetch.count)])
+            var results: [(String, [String])] = []
+            await withTaskGroup(of: (String, [String]).self) { group in
+                for meta in slice {
+                    group.addTask {
+                        let tags = (try? await JmClient.shared.album(id: meta.id))?.tags ?? []
+                        return (meta.id, tags)
+                    }
+                }
+                for await result in group { results.append(result) }
+            }
+            for (id, tags) in results {
+                let actual = Set(tags.map {
+                    $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                })
+                if required.isSubset(of: actual) { matchedIDs.insert(id) }
+            }
+        }
+
+        // 恢复服务端原始顺序；Set 只用于判断，不参与排序。
+        return metas.filter { matchedIDs.contains($0.id) }
+    }
+
     // MARK: - 本子元数据
 
     func album(_ id: String) -> Album? { albums[id] }
