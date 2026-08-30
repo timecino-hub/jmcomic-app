@@ -48,6 +48,9 @@ struct SettingsView: View {
     private var initialExcluded: Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: "excludedTags") ?? [])
     }
+    private var exclusionChoices: [String] {
+        Array(Set(Self.exclusionOptions).union(excluded)).sorted()
+    }
 
     // 缓存清理
     @State private var cacheSizeText = "计算中…"
@@ -237,7 +240,7 @@ struct SettingsView: View {
         Section("内容过滤（不感兴趣）") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6)],
                       alignment: .leading, spacing: 6) {
-                ForEach(Self.exclusionOptions, id: \.self) { t in
+                ForEach(exclusionChoices, id: \.self) { t in
                     Button {
                         if excluded.contains(t) { excluded.remove(t) } else { excluded.insert(t) }
                     } label: {
@@ -253,6 +256,10 @@ struct SettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+            .onAppear {
+                // 详情页长按可加入任意标签；返回设置时同步刷新，确保可以单独取消。
+                excluded = Set(UserDefaults.standard.stringArray(forKey: "excludedTags") ?? [])
+            }
 
             Text(excluded.isEmpty ? "未设置过滤" : "已排除：\(excluded.sorted().joined(separator: ", "))")
                 .font(.caption).foregroundStyle(.secondary)

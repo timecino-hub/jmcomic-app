@@ -65,6 +65,8 @@ extension View {
 enum Route: Hashable {
     case album(AlbumMeta)
     case categories      // 分类筛选
+    case tag(String)     // 精确标签检索
+    case author(String)  // 精确作者检索
     case personalized    // 为你推荐
     case recent          // 最近浏览
 }
@@ -78,6 +80,20 @@ enum AppPrefs {
     /// 读完自动接下一话：停在本话最后一页片刻后自动切章。默认关闭。
     static var autoNextChapterEnabled: Bool {
         UserDefaults.standard.object(forKey: "readerAutoNext") as? Bool ?? false
+    }
+
+    /// 从详情页把任意标签加入内容过滤。返回 false 表示标签已存在或为空。
+    @discardableResult
+    static func addExcludedTag(_ tag: String) -> Bool {
+        let value = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return false }
+        var tags = UserDefaults.standard.stringArray(forKey: "excludedTags") ?? []
+        guard !tags.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else {
+            return false
+        }
+        tags.append(value)
+        UserDefaults.standard.set(tags, forKey: "excludedTags")
+        return true
     }
 }
 
@@ -176,18 +192,36 @@ struct AlbumCard: View {
 struct FlowTags: View {
     let tags: [String]
     var onTap: ((String) -> Void)? = nil
+    var onExclude: ((String) -> Void)? = nil
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 6, alignment: .leading)],
                   alignment: .leading, spacing: 6) {
             ForEach(tags, id: \.self) { t in
-                if let onTap {
-                    Button { onTap(t) } label: { tagView(t) }
-                        .buttonStyle(.plain)
+                if let onExclude {
+                    tappableTag(t)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                onExclude(t)
+                            } label: {
+                                Label("加入不感兴趣标签", systemImage: "eye.slash")
+                            }
+                        }
                 } else {
-                    tagView(t)
+                    tappableTag(t)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func tappableTag(_ tag: String) -> some View {
+        if let onTap {
+            Button { onTap(tag) } label: { tagView(tag) }
+                .buttonStyle(.plain)
+                .accessibilityHint("查看含此标签的漫画")
+        } else {
+            tagView(tag)
         }
     }
 

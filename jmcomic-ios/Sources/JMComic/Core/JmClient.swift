@@ -331,6 +331,30 @@ actor JmClient {
         return JmParser.parsePaged(json, page: page)
     }
 
+    /// 精确作者检索。main_tag=2 将查询限制在作者字段。
+    func searchAuthor(_ author: String, order: String = "mr", time: String = "a",
+                      page: Int) async throws -> PagedAlbums {
+        try await searchField(author, mainTag: 2, order: order, time: time, page: page)
+    }
+
+    /// 精确标签检索。main_tag=3 将查询限制在标签字段。
+    func searchTag(_ tag: String, order: String = "mr", time: String = "a",
+                   page: Int) async throws -> PagedAlbums {
+        try await searchField(tag, mainTag: 3, order: order, time: time, page: page)
+    }
+
+    private func searchField(_ text: String, mainTag: Int, order: String, time: String,
+                             page: Int) async throws -> PagedAlbums {
+        let json = try await getJSON(path: "search", query: [
+            .init(name: "main_tag", value: String(mainTag)),
+            .init(name: "search_query", value: text),
+            .init(name: "o", value: order),
+            .init(name: "t", value: time),
+            .init(name: "page", value: String(page)),
+        ])
+        return JmParser.parsePaged(json, page: page)
+    }
+
     /// 热门标签（服务端真实数据；纯数组/{"list":[...]} 两种格式都被归一化）
     func hotTags() async throws -> [String] {
         let json = try await getJSON(path: "hot_tags")
@@ -340,12 +364,15 @@ actor JmClient {
 
     /// 分类筛选：c 为大类 slug（doujin/single/short/hanman/meiman/cosplay/3D 等），
     /// o 为排序（mv=最多观看）。与 Java 版 getCategories 对齐。
-    func categories(_ category: String, order: String = "mv", page: Int) async throws -> PagedAlbums {
+    func categories(_ category: String, order: String = "mv", time: String = "a",
+                    page: Int) async throws -> PagedAlbums {
+        // 移动端分类接口把时间范围编码在 o 中：mv / mv_m / mv_w / mv_t。
+        let resolvedOrder = time == "a" ? order : "\(order)_\(time)"
         let json = try await getJSON(path: "categories/filter", query: [
             .init(name: "page", value: String(page)),
             .init(name: "order", value: ""),
             .init(name: "c", value: category),
-            .init(name: "o", value: order),
+            .init(name: "o", value: resolvedOrder),
         ])
         return JmParser.parsePaged(json, page: page)
     }
