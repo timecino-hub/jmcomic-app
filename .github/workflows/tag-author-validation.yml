@@ -1,0 +1,55 @@
+name: Tag and author validation
+
+on:
+  push:
+    branches:
+      - feat/ios-tag-browser
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Verify feature wiring
+        run: |
+          grep -q 'mainTag: 2' jmcomic-ios/Sources/JMComic/Core/JmClient.swift
+          grep -q 'mainTag: 3' jmcomic-ios/Sources/JMComic/Core/JmClient.swift
+          grep -q 'case author(String)' jmcomic-ios/Sources/JMComic/UI/Shared.swift
+          grep -q 'case tag(String)' jmcomic-ios/Sources/JMComic/UI/Shared.swift
+          grep -q 'filterByRequiredTags' jmcomic-ios/Sources/JMComic/Core/LibraryStore.swift
+
+      - name: Build Release for iPhone and iPad devices
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project jmcomic-ios/jmcomic-ios.xcodeproj \
+            -scheme JMComic-iOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            build -quiet
+
+      - name: Build Release for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project jmcomic-ios/jmcomic-ios.xcodeproj \
+            -scheme JMComic-iOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/simulator \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build -quiet
