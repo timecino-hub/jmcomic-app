@@ -37,8 +37,9 @@ jobs:
         run: |
           APP=$(find jmcomic-ios/build-ipados/Build/Products -type d -name '*.app' | head -1)
           test -n "$APP"
-          /usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily:0' "$APP/Info.plist" | grep -qx '1'
-          /usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily:1' "$APP/Info.plist" | grep -qx '2'
+          plutil -p "$APP/Info.plist"
+          plutil -extract UIDeviceFamily xml1 -o - "$APP/Info.plist" | grep -q '<integer>1</integer>'
+          plutil -extract UIDeviceFamily xml1 -o - "$APP/Info.plist" | grep -q '<integer>2</integer>'
           test -s dist/JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned.ipa
 
       - name: Build simulator Release
