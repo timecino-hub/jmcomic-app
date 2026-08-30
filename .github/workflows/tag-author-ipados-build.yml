@@ -40,7 +40,7 @@ jobs:
           plutil -p "$APP/Info.plist"
           plutil -extract UIDeviceFamily xml1 -o - "$APP/Info.plist" | grep -q '<integer>1</integer>'
           plutil -extract UIDeviceFamily xml1 -o - "$APP/Info.plist" | grep -q '<integer>2</integer>'
-          test -s dist/JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned.ipa
+          test -s jmcomic-ios/dist/JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned.ipa
 
       - name: Build simulator Release
         run: |
@@ -58,6 +58,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned
-          path: dist/JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned.ipa
+          path: jmcomic-ios/dist/JMComic-iPadOS-JMCloud-TagAuthor-v1.2.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
